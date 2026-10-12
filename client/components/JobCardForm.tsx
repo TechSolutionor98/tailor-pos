@@ -10,6 +10,7 @@ import {
   type JobCardPayment,
   type Ledger,
   type LedgerDue,
+  type PaymentMode,
   type Product,
   type SavedBank,
   type SavedCard,
@@ -177,7 +178,20 @@ export function JobCardForm({ initial, mode }: { initial?: JobCard | null; mode:
   );
   const [bank, setBank] = useState(initial?.bank ?? '');
   const [creditCardNo, setCreditCardNo] = useState(initial?.creditCardNo ?? '');
-  const [payments, setPayments] = useState<JobCardPayment[]>(initial?.payments ?? []);
+  const [payments, setPayments] = useState<JobCardPayment[]>(() => {
+    if (initial?.payments && initial.payments.length > 0) return initial.payments;
+    if (initial && num(initial.advance) > 0) {
+      return [
+        {
+          date: initial.date ? toISODate(initial.date) : todayISO(),
+          mode: (initial.paymentMode as PaymentMode) || 'cash',
+          amount: num(initial.advance),
+          discount: 0,
+        },
+      ];
+    }
+    return [];
+  });
   // What is being handed over right now, before it is recorded. Held apart
   // from `payments`, which is only ever what the server has already booked.
   const [split, setSplit] = useState<Split>(emptySplit);
@@ -247,6 +261,7 @@ export function JobCardForm({ initial, mode }: { initial?: JobCard | null; mode:
         const n = await api.jobCards.next();
         setNo(n.no);
         setRef(n.ref);
+        if (n.bookNo != null) setBookNo(String(n.bookNo));
       } catch (e) {
         toast(e instanceof Error ? e.message : 'Could not get next number', 'error');
       }
@@ -282,6 +297,17 @@ export function JobCardForm({ initial, mode }: { initial?: JobCard | null; mode:
     const qtyCount = r2(charged.reduce((s, r) => s + r.qty, 0));
     return { rows, total, additionalCharges: extra, discount: d, taxable, tax, netAmount, advance, advanceBeforeTax, advanceTax, balance, materialTotal, itemCount, qtyCount };
   }, [items, discount, additionalCharges, payments, sets, taxRate]);
+
+  const advanceBreakdown = useMemo(() => {
+    const bd: Record<TenderMode, number> = { cash: 0, card: 0, bank: 0 };
+    for (const p of payments) {
+      const m = (p.mode === 'credit' ? 'cash' : p.mode) as TenderMode;
+      if (m in bd) {
+        bd[m] = r2(bd[m] + num(p.amount));
+      }
+    }
+    return bd;
+  }, [payments]);
 
   /**
    * What this customer owed before this order.
@@ -338,7 +364,20 @@ export function JobCardForm({ initial, mode }: { initial?: JobCard | null; mode:
     setPaymentMode(d.paymentMode ?? 'cash');
     setBank(d.bank ?? '');
     setCreditCardNo(d.creditCardNo ?? '');
-    setPayments(d.payments ?? []);
+    if (d.payments && d.payments.length > 0) {
+      setPayments(d.payments);
+    } else if (num(d.advance) > 0) {
+      setPayments([
+        {
+          date: d.date ? toISODate(d.date) : todayISO(),
+          mode: (d.paymentMode as PaymentMode) || 'cash',
+          amount: num(d.advance),
+          discount: 0,
+        },
+      ]);
+    } else {
+      setPayments([]);
+    }
     setStatus(d.status);
   }
 
@@ -461,6 +500,11 @@ export function JobCardForm({ initial, mode }: { initial?: JobCard | null; mode:
     }
   }
 
+  function handleClearMode(m: TenderMode) {
+    setSplit((prev) => ({ ...prev, [m]: '' }));
+    setPayments((prev) => prev.filter((p) => (p.mode === 'credit' ? 'cash' : p.mode) !== m));
+  }
+
   /**
    * @param andPrint hand over to the order's invoice with the print dialog
    *   opening, rather than staying on the form.
@@ -517,13 +561,12 @@ export function JobCardForm({ initial, mode }: { initial?: JobCard | null; mode:
       settled.current = true;
 
       const taken = await bookSplit(doc._id, doc.balance, false);
-      const res = await api.jobCards.convert(doc._id, {});
-      const what = `Order ${doc.no} saved & converted to Bill B-${res.sale.billNo}`;
-      toast(taken > 0 ? `${what} · ${fmt(taken)} AED taken` : what);
+      const what = `Order ${doc.no} updated · Shifting to New Sale`;
+      toast(taken > 0 ? `${what} · ${fmt(taken)} AED recorded` : what);
 
-      router.push(`/sales/${res.sale._id}`);
+      router.push(`/sales/new?fromJobCard=${doc._id}`);
     } catch (e) {
-      toast(e instanceof Error ? e.message : 'Save & Convert failed', 'error');
+      toast(e instanceof Error ? e.message : 'Save failed', 'error');
     } finally {
       setSaving(false);
     }
@@ -871,26 +914,7 @@ export function JobCardForm({ initial, mode }: { initial?: JobCard | null; mode:
 
   return (
     <div>
-      {mode === 'edit' && (
-        <div className="mb-5 flex items-center justify-center gap-3">
-          <button
-            className="btn-soft"
-            onClick={() => navigate('prev')}
-            disabled={!neighbours.prev}
-            title={neighbours.prev ? 'Go to the previous order' : 'This is the first order'}
-          >
-            ‹‹ Previous Order
-          </button>
-          <button
-            className="btn-soft"
-            onClick={() => navigate('next')}
-            disabled={!neighbours.next}
-            title={neighbours.next ? 'Go to the next order' : 'This is the last order'}
-          >
-            Next Order ››
-          </button>
-        </div>
-      )}
+
 
       {readOnly && (
         <div className="mb-5 rounded-2xl border border-brand-200 bg-brand-50 px-5 py-3 text-sm font-semibold text-brand-800">
@@ -1063,8 +1087,8 @@ export function JobCardForm({ initial, mode }: { initial?: JobCard | null; mode:
                           selectAndFocusItem(i, false);
                         }}
                         className={`transition-all duration-200 cursor-pointer ${isSelected
-                            ? 'bg-emerald-100/90 text-emerald-950 font-semibold ring-2 ring-emerald-500/80 shadow-md border-l-4 border-emerald-600'
-                            : 'hover:bg-emerald-50/60'
+                          ? 'bg-emerald-100/90 text-emerald-950 font-semibold ring-2 ring-emerald-500/80 shadow-md border-l-4 border-emerald-600'
+                          : 'hover:bg-emerald-50/60'
                           } ${freshItem === i ? 'bg-brand-50' : ''}`}
                       >
                         <td className="td w-10 text-center text-ink-400 font-mono text-xs">{i + 1}</td>
@@ -1296,7 +1320,7 @@ export function JobCardForm({ initial, mode }: { initial?: JobCard | null; mode:
                 this invoice and charge tax on it a second time. */}
             <div className="mt-1.5 flex items-center justify-between gap-3 text-xs font-bold">
               {priorDue > 0 ? (
-                <span className="text-rose-600">Due Balance: {fmt(priorDue)}</span>
+                <span className="text-rose-600">Due Balance: {fmt(priorDue)} AED</span>
               ) : (
                 <span />
               )}
@@ -1310,22 +1334,9 @@ export function JobCardForm({ initial, mode }: { initial?: JobCard | null; mode:
 
             <div className="mb-3 mt-3 border-t border-ink-100" />
 
-            {/* Anything already taken, so the pad below only ever counts what
-                is being handed over now. */}
             {calc.advance > 0 && (
-              <div className="mb-3 space-y-1.5">
-                <div className="flex items-center justify-between rounded-xl bg-ink-50 px-3 py-2">
-                  <span className="label !mb-0">Already Paid</span>
-                  <span className="text-[13px] font-extrabold tabular-nums">{fmt(calc.advance)}</span>
-                </div>
-                <div className="flex items-center justify-between px-1 text-xs">
-                  <span className="text-ink-500">Advance Before Tax</span>
-                  <span className="font-semibold tabular-nums">{fmt(calc.advanceBeforeTax)}</span>
-                </div>
-                <div className="flex items-center justify-between px-1 text-xs">
-                  <span className="text-ink-500">Advance Tax</span>
-                  <span className="font-semibold tabular-nums">{fmt(calc.advanceTax)}</span>
-                </div>
+              <div className="mb-2.5 flex items-center justify-between gap-3 text-xs font-bold">
+                <span className="text-emerald-700">Already Paid: {fmt(calc.advance)} AED</span>
               </div>
             )}
 
@@ -1337,6 +1348,8 @@ export function JobCardForm({ initial, mode }: { initial?: JobCard | null; mode:
               onDetailsChange={setTenderDetails}
               savedCards={savedCards}
               savedBanks={savedBanks}
+              alreadyPaid={advanceBreakdown}
+              onClear={handleClearMode}
               onPay={docId && canPay ? () => void paySplit() : undefined}
               disabled={readOnly}
               busy={payingSplit}
@@ -1390,9 +1403,9 @@ export function JobCardForm({ initial, mode }: { initial?: JobCard | null; mode:
                     className="w-full rounded-xl bg-emerald-600 px-4 py-2 text-[13px] font-bold text-white transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-40"
                     onClick={() => void saveAndConvert()}
                     disabled={saving || readOnly}
-                    title="Update order and convert to Sales bill immediately"
+                    title="Update order and shift all data to New Sale"
                   >
-                    {saving ? 'Updating…' : '⚡ Move To Sale'}
+                    {saving ? 'Updating…' : '⚡ Move to Sale'}
                   </button>
                 )}
               </div>

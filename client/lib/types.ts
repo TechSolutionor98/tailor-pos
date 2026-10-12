@@ -282,6 +282,8 @@ export interface Sale {
   trn?: string;
   vehicleNo?: string;
   items: SaleItem[];
+  materialsUsed?: JobCardMaterial[];
+  materialTotal?: number;
   totQty: number;
   grossAmount: number;
   discountAmt: number;
@@ -307,6 +309,9 @@ export interface Sale {
   accountName?: string;
   iban?: string;
   swift?: string;
+  cashPaid?: number;
+  cardPaid?: number;
+  bankPaid?: number;
 }
 
 export interface Page<T> {

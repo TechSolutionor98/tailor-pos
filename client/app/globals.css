@@ -42,6 +42,13 @@
   ::-webkit-scrollbar-thumb:hover {
     @apply bg-ink-400;
   }
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+  .no-scrollbar {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
   /* Numbers in tables should never jitter as they update. */
   table {
     font-variant-numeric: tabular-nums;

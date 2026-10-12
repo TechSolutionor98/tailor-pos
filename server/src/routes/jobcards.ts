@@ -3,7 +3,7 @@ import { Types } from 'mongoose';
 import { JobCard } from '../models/JobCard';
 import { MeasurementProfile } from '../models/MeasurementProfile';
 import { Sale } from '../models/Sale';
-import { nextSeq, peekSeq } from '../models/Counter';
+import { Counter, nextSeq, peekSeq } from '../models/Counter';
 import { asyncHandler, HttpError } from '../middleware';
 import { requireAuth, requirePerm } from '../auth/guard';
 import { diffSnapshots, recordAudit, snapshotJobCard } from '../utils/audit';
@@ -249,13 +249,14 @@ jobCardRouter.get(
   }),
 );
 
-// GET /jobcards/next -> { no, ref } (peek, does not consume)
+// GET /jobcards/next -> { no, ref, bookNo } (peek, does not consume)
 jobCardRouter.get(
   '/next',
   requirePerm('jobcards.view'),
   asyncHandler(async (_req, res) => {
     const no = await peekSeq('jobcard', 13258);
-    res.json({ no, ref: `${REF_PREFIX}-${no}` });
+    const bookNo = await peekSeq('book_no', 270);
+    res.json({ no, ref: `${REF_PREFIX}-${no}`, bookNo });
   }),
 );
 
@@ -318,6 +319,22 @@ jobCardRouter.post(
   requirePerm('jobcards.create'),
   asyncHandler(async (req, res) => {
     const body = (req.body ?? {}) as JobCardBody;
+    // Sequential unique book number:
+    let bookNo =
+      body.bookNo !== undefined && body.bookNo !== null && !isNaN(Number(body.bookNo))
+        ? num(body.bookNo)
+        : await nextSeq('book_no');
+
+    // Duplicate book number check:
+    const duplicateBook = await JobCard.findOne({ bookNo });
+    if (duplicateBook) {
+      throw new HttpError(
+        400,
+        `Book No ${bookNo} already exists on Order ${duplicateBook.no ?? duplicateBook.ref}. Duplicate book numbers are not allowed.`,
+      );
+    }
+    await Counter.updateOne({ _id: 'book_no' }, { $max: { seq: bookNo } }, { upsert: true });
+
     // Every order written here is a real order and takes the next number in
     // the shop's sequence. Nothing is saved part-finished any more.
     const no = await nextSeq('jobcard');
@@ -330,7 +347,7 @@ jobCardRouter.post(
     const advSplit = advanceSplit(advance, computed.taxRate);
     const jobCard = await JobCard.create({
       no,
-      bookNo: num(body.bookNo, 270),
+      bookNo,
       ref: body.ref?.trim() || `${REF_PREFIX}-${no}`,
       date: body.date && !isNaN(new Date(body.date).getTime()) ? new Date(body.date) : new Date(),
       deliveryDate: body.deliveryDate && !isNaN(new Date(body.deliveryDate).getTime()) ? new Date(body.deliveryDate) : undefined,
@@ -411,8 +428,27 @@ jobCardRouter.put(
       Object.assign(existing.measurements, body.measurements);
     }
 
+    let bookNo = existing.bookNo;
+    if (body.bookNo !== undefined && body.bookNo !== null && !isNaN(Number(body.bookNo))) {
+      const candidate = num(body.bookNo);
+      if (candidate !== existing.bookNo) {
+        const duplicateBook = await JobCard.findOne({
+          bookNo: candidate,
+          _id: { $ne: existing._id },
+        });
+        if (duplicateBook) {
+          throw new HttpError(
+            400,
+            `Book No ${candidate} already exists on Order ${duplicateBook.no ?? duplicateBook.ref}. Duplicate book numbers are not allowed.`,
+          );
+        }
+        bookNo = candidate;
+        await Counter.updateOne({ _id: 'book_no' }, { $max: { seq: candidate } }, { upsert: true });
+      }
+    }
+
     existing.set({
-      bookNo: body.bookNo !== undefined ? num(body.bookNo, 270) : existing.bookNo,
+      bookNo,
       ref: body.ref?.trim() || existing.ref,
       date: body.date ? new Date(body.date) : existing.date,
       deliveryDate: body.deliveryDate ? new Date(body.deliveryDate) : existing.deliveryDate,

@@ -130,6 +130,8 @@ export function SplitTender({
   busy = false,
   payLabel = 'Advance',
   note,
+  alreadyPaid,
+  onClear,
 }: {
   /** What this payment has to cover. */
   due: number;
@@ -146,6 +148,10 @@ export function SplitTender({
   payLabel?: string;
   /** Shown under the button when paying is not possible yet, and why. */
   note?: string;
+  /** Advance or past payments already taken on this order by payment mode. */
+  alreadyPaid?: Partial<Record<TenderMode, number>>;
+  /** Called to clear any amount on a mode (including advance). */
+  onClear?: (mode: TenderMode) => void;
 }) {
   const [mode, setMode] = useState<TenderMode>('cash');
   /** Card and bank details stay folded away until they are asked for. */
@@ -431,27 +437,61 @@ export function SplitTender({
       {/* every tender at once, so nothing is counted twice or forgotten */}
       <div className="mt-2.5 grid grid-cols-3 gap-1.5">
         {MODES.map((m) => {
-          const amt = num(value[m.value]);
+          const adv = num(alreadyPaid?.[m.value]);
+          const current = num(value[m.value]);
+          const total = Math.round((adv + current) * 100) / 100;
+          const isSelected = mode === m.value;
           return (
-            <div key={m.value} className="text-center">
+            <div
+              key={m.value}
+              onClick={() => {
+                if (!disabled) setMode(m.value);
+              }}
+              className="group cursor-pointer text-center"
+            >
               <div
-                className={`flex items-center justify-center gap-1 rounded-full px-2 py-1 text-xs font-bold tabular-nums ${
-                  amt > 0 ? 'bg-brand-50 text-brand-800' : 'bg-ink-50 text-ink-400'
+                className={`flex items-center justify-center gap-1 rounded-full px-2 py-1 text-xs font-bold tabular-nums transition ${
+                  adv > 0 && current > 0
+                    ? 'border border-emerald-300 bg-emerald-100 text-emerald-900 ring-1 ring-emerald-300'
+                    : adv > 0
+                    ? 'border border-emerald-300 bg-emerald-50 text-emerald-800 shadow-xs'
+                    : current > 0
+                    ? 'border border-brand-200 bg-brand-50 text-brand-800'
+                    : isSelected
+                    ? 'border border-ink-200 bg-ink-100 text-ink-700'
+                    : 'border border-transparent bg-ink-50 text-ink-400'
                 }`}
               >
-                <span className="truncate">{fmt(amt)}</span>
+                <span className="truncate">{fmt(total)}</span>
                 <button
                   type="button"
-                  disabled={disabled || amt <= 0}
-                  onClick={() => set(m.value, '')}
-                  title={`Clear the ${m.label} amount`}
+                  disabled={disabled || total <= 0}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    if (onClear) {
+                      onClear(m.value);
+                    } else {
+                      set(m.value, '');
+                    }
+                  }}
+                  title={`Clear ${m.label} amount`}
                   aria-label={`Clear ${m.label}`}
-                  className="shrink-0 text-ink-400 transition hover:text-rose-600 disabled:opacity-30"
+                  className="shrink-0 text-ink-400 transition hover:text-rose-600 disabled:cursor-not-allowed disabled:opacity-30"
                 >
                   ✕
                 </button>
               </div>
-              <p className="mt-0.5 text-[10px] font-medium text-ink-500">{m.label}</p>
+              <p
+                className={`mt-0.5 text-[10px] font-bold transition ${
+                  adv > 0
+                    ? 'text-emerald-700'
+                    : isSelected
+                    ? 'text-brand-700'
+                    : 'text-ink-600 group-hover:text-brand-600'
+                }`}
+              >
+                {m.label}
+              </p>
             </div>
           );
         })}

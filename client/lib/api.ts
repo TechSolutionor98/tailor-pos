@@ -187,7 +187,7 @@ export const api = {
       get<Page<JobCard>>(
         `/jobcards?q=${encodeURIComponent(q)}&status=${status}&page=${page}&limit=${limit}`,
       ),
-    next: () => get<{ no: number; ref: string }>('/jobcards/next'),
+    next: () => get<{ no: number; ref: string; bookNo?: number }>('/jobcards/next'),
     adjacent: (no: number, dir: 'prev' | 'next') =>
       get<JobCard>(`/jobcards/adjacent?no=${no}&dir=${dir}`),
     get: (id: string) => get<JobCard>(`/jobcards/${id}`),

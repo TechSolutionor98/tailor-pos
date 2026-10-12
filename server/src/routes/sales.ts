@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { Sale } from '../models/Sale';
+import { JobCard } from '../models/JobCard';
 import { nextSeq, peekSeq } from '../models/Counter';
 import { asyncHandler, HttpError } from '../middleware';
 import { num, r2 } from '../utils/money';
@@ -57,6 +58,8 @@ interface SaleBody {
   trn?: string;
   vehicleNo?: string;
   items?: SaleItemBody[];
+  materialsUsed?: { code?: string; productName?: string; qty?: number; rate?: number }[];
+  materialTotal?: number;
   bookingNo?: string;
   refNo?: string;
   additionalDiscount?: number;
@@ -77,6 +80,9 @@ interface SaleBody {
   accountName?: string;
   iban?: string;
   swift?: string;
+  cashPaid?: number;
+  cardPaid?: number;
+  bankPaid?: number;
 }
 
 // GET /sales?q=&isReturn=&page=&limit=
@@ -183,6 +189,19 @@ saleRouter.post(
       };
     });
 
+    const materialsUsed = (body.materialsUsed ?? [])
+      .filter((m) => m && (m.code || m.productName || num(m.qty) || num(m.rate)))
+      .map((m) => ({
+        code: m.code || '',
+        productName: m.productName || '',
+        qty: num(m.qty),
+        rate: num(m.rate),
+      }));
+    const materialTotal = num(
+      body.materialTotal,
+      r2(materialsUsed.reduce((s, m) => s + m.qty * m.rate, 0)),
+    );
+
     const billNo = await nextSeq('sale');
     const sale = await Sale.create({
       billNo,
@@ -204,6 +223,8 @@ saleRouter.post(
       bookingNo: body.bookingNo?.trim() || body.jobCardRef?.trim(),
       refNo: body.refNo?.trim() || `B-${billNo}`,
       items,
+      materialsUsed,
+      materialTotal,
       totQty,
       grossAmount,
       discountAmt,
@@ -231,7 +252,18 @@ saleRouter.post(
       accountName: body.accountName?.trim(),
       iban: body.iban?.trim(),
       swift: body.swift?.trim(),
+      cashPaid: num(body.cashPaid),
+      cardPaid: num(body.cardPaid),
+      bankPaid: num(body.bankPaid),
     });
+
+    if (body.jobCardId) {
+      await JobCard.findByIdAndUpdate(body.jobCardId, {
+        status: 'converted',
+        invoiceNo: `B-${billNo}`,
+      });
+    }
+
     res.status(201).json(sale);
   }),
 );

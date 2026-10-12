@@ -74,6 +74,7 @@ async function seed() {
   // Continue numbering from the old system
   await Counter.updateOne({ _id: 'jobcard' }, { $set: { seq: 13258 } }, { upsert: true });
   await Counter.updateOne({ _id: 'sale' }, { $set: { seq: 85934 } }, { upsert: true });
+  await Counter.updateOne({ _id: 'book_no' }, { $setOnInsert: { seq: 270 } }, { upsert: true });
 
   // --- Users -------------------------------------------------------------
   // Only ever created, never overwritten: re-running the seed must not reset

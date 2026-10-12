@@ -230,5 +230,10 @@ jobCardSchema.index(
   { unique: true, partialFilterExpression: { no: { $type: 'number' } } },
 );
 
+jobCardSchema.index(
+  { bookNo: 1 },
+  { unique: true, partialFilterExpression: { bookNo: { $type: 'number' } } },
+);
+
 export const JobCard =
   models.JobCard || model<IJobCard>('JobCard', jobCardSchema);

@@ -75,7 +75,27 @@ export interface ISale extends Document {
   swift?: string;
   /** Handed back when the customer pays more than the bill. */
   changeReturn?: number;
+  cashPaid?: number;
+  cardPaid?: number;
+  bankPaid?: number;
+  materialsUsed?: {
+    code?: string;
+    productName?: string;
+    qty?: number;
+    rate?: number;
+  }[];
+  materialTotal?: number;
 }
+
+const materialSchema = new Schema(
+  {
+    code: String,
+    productName: String,
+    qty: { type: Number, default: 0 },
+    rate: { type: Number, default: 0 },
+  },
+  { _id: false },
+);
 
 const saleItemSchema = new Schema<ISaleItem>(
   {
@@ -124,6 +144,8 @@ const saleSchema = new Schema<ISale>(
     trn: String,
     vehicleNo: String,
     items: { type: [saleItemSchema], default: [] },
+    materialsUsed: { type: [materialSchema], default: [] },
+    materialTotal: { type: Number, default: 0 },
     totQty: { type: Number, default: 0 },
     grossAmount: { type: Number, default: 0 },
     discountAmt: { type: Number, default: 0 },
@@ -148,6 +170,9 @@ const saleSchema = new Schema<ISale>(
     iban: { type: String, trim: true },
     swift: { type: String, trim: true },
     changeReturn: { type: Number, default: 0 },
+    cashPaid: { type: Number, default: 0 },
+    cardPaid: { type: Number, default: 0 },
+    bankPaid: { type: Number, default: 0 },
   },
   { timestamps: true },
 );

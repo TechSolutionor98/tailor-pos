@@ -105,13 +105,20 @@ export function OrderInvoice({
 
   /** How this order was actually settled, rather than what was planned. */
   const paymentsList = card.payments ?? [];
-  const cashPaid = paymentsList.filter((p) => p.mode === 'cash').reduce((s, p) => s + (p.amount || 0), 0);
-  const cardPaid = paymentsList.filter((p) => p.mode === 'card').reduce((s, p) => s + (p.amount || 0), 0);
-  const bankPaid = paymentsList.filter((p) => p.mode === 'bank').reduce((s, p) => s + (p.amount || 0), 0);
+  let cashPaid = paymentsList.filter((p) => p.mode === 'cash').reduce((s, p) => s + (p.amount || 0), 0);
+  let cardPaid = paymentsList.filter((p) => p.mode === 'card').reduce((s, p) => s + (p.amount || 0), 0);
+  let bankPaid = paymentsList.filter((p) => p.mode === 'bank').reduce((s, p) => s + (p.amount || 0), 0);
+  if (!paymentsList.length && (card.advance || 0) > 0) {
+    if (card.paymentMode === 'card') cardPaid = card.advance;
+    else if (card.paymentMode === 'bank') bankPaid = card.advance;
+    else cashPaid = card.advance;
+  }
 
   const modes = Array.from(new Set(paymentsList.map((p) => p.mode)));
   const paymentMethod = modes.length
     ? modes.map((m) => (m === 'bank' ? 'Bank Transfer' : m === 'card' ? 'Card' : 'Cash')).join(' + ')
+    : (card.advance || 0) > 0
+    ? (card.paymentMode === 'card' ? 'Card' : card.paymentMode === 'bank' ? 'Bank Transfer' : 'Cash')
     : 'Unpaid';
 
   const bankLines = [
