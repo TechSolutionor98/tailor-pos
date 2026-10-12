@@ -237,6 +237,7 @@ export function JobCardForm({ initial, mode }: { initial?: JobCard | null; mode:
   const canSave = mode === 'new' ? can('jobcards.create') : can('jobcards.edit');
   const canPay = can('jobcards.payment');
   const canAddLedger = can('ledgers.manage');
+  const canConvert = can('jobcards.convert');
 
   // New mode: fetch next number
   useEffect(() => {
@@ -494,6 +495,35 @@ export function JobCardForm({ initial, mode }: { initial?: JobCard | null; mode:
       router.push(andPrint ? `/job-cards/${doc._id}/invoice?print=1` : '/job-cards');
     } catch (e) {
       toast(e instanceof Error ? e.message : 'Save failed', 'error');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function saveAndConvert() {
+    if (!partyName.trim()) {
+      toast('Customer Name is required', 'error');
+      return;
+    }
+    setSaving(true);
+    try {
+      let doc: JobCard | null = null;
+      if (mode === 'new') {
+        doc = await api.jobCards.create(payload());
+      } else if (docId) {
+        doc = await api.jobCards.update(docId, payload());
+      }
+      if (!doc) return;
+      settled.current = true;
+
+      const taken = await bookSplit(doc._id, doc.balance, false);
+      const res = await api.jobCards.convert(doc._id, {});
+      const what = `Order ${doc.no} saved & converted to Bill B-${res.sale.billNo}`;
+      toast(taken > 0 ? `${what} · ${fmt(taken)} AED taken` : what);
+
+      router.push(`/sales/${res.sale._id}`);
+    } catch (e) {
+      toast(e instanceof Error ? e.message : 'Save & Convert failed', 'error');
     } finally {
       setSaving(false);
     }
@@ -1326,21 +1356,45 @@ export function JobCardForm({ initial, mode }: { initial?: JobCard | null; mode:
               the figures it commits.
             */}
             {canSave && (
-              <div className="mt-3 grid grid-cols-2 gap-2.5">
-                <button
-                  className="btn-primary !py-2 text-[13px]"
-                  onClick={() => void save(true)}
-                  disabled={saving || readOnly}
-                >
-                  {saving ? 'Saving…' : 'Save & Print'}
-                </button>
-                <button
-                  className="btn-soft !py-2 text-[13px]"
-                  onClick={() => void save(false)}
-                  disabled={saving || readOnly}
-                >
-                  {saving ? 'Saving…' : 'Save Only'}
-                </button>
+              <div className="mt-3 space-y-2">
+                <div className="grid grid-cols-2 gap-2.5">
+                  <button
+                    className="btn-soft !py-2 text-[13px]"
+                    onClick={() => void save(false)}
+                    disabled={saving || readOnly}
+                  >
+                    {saving
+                      ? mode === 'edit'
+                        ? 'Updating…'
+                        : 'Saving…'
+                      : mode === 'edit'
+                        ? 'Update Only'
+                        : 'Save Only'}
+                  </button>
+                  <button
+                    className="btn-primary !py-2 text-[13px]"
+                    onClick={() => void save(true)}
+                    disabled={saving || readOnly}
+                  >
+                    {saving
+                      ? mode === 'edit'
+                        ? 'Updating…'
+                        : 'Saving…'
+                      : mode === 'edit'
+                        ? 'Update & Print'
+                        : 'Save & Print'}
+                  </button>
+                </div>
+                {mode === 'edit' && canConvert && !readOnly && (
+                  <button
+                    className="w-full rounded-xl bg-emerald-600 px-4 py-2 text-[13px] font-bold text-white transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-40"
+                    onClick={() => void saveAndConvert()}
+                    disabled={saving || readOnly}
+                    title="Update order and convert to Sales bill immediately"
+                  >
+                    {saving ? 'Updating…' : '⚡ Move To Sale'}
+                  </button>
+                )}
               </div>
             )}
             {mode === 'edit' && (
