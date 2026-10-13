@@ -2,6 +2,7 @@
 
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import type { AppSettings } from '@/lib/types';
+import { api } from '@/lib/api';
 
 const KEY = 'tailor-pos-settings';
 
@@ -10,8 +11,6 @@ const DEFAULTS: AppSettings = {
   bookNo: 270,
   salesman: 'GENERAL',
   deliveryDays: 7,
-  // Left blank on purpose: an invoice must carry the shop's own details, and
-  // a plausible-looking placeholder is worse than an obviously empty line.
   company: {
     name: '',
     address: '',
@@ -33,13 +32,24 @@ const DEFAULTS: AppSettings = {
     chequeFavour: '',
     note: '',
   },
-  invoiceTitle: 'Stitching Order',
+  invoiceTitle: 'Order Invoice',
 };
+
+function mergeSettings(base: AppSettings, incoming?: Partial<AppSettings> | null): AppSettings {
+  if (!incoming) return base;
+  return {
+    ...base,
+    ...incoming,
+    company: { ...base.company, ...(incoming.company ?? {}) },
+    bank: { ...base.bank, ...(incoming.bank ?? {}) },
+  };
+}
 
 const SettingsCtx = createContext<{
   settings: AppSettings;
-  save: (s: AppSettings) => void;
-}>({ settings: DEFAULTS, save: () => {} });
+  save: (s: AppSettings) => Promise<void> | void;
+  reload: () => Promise<void>;
+}>({ settings: DEFAULTS, save: () => {}, reload: async () => {} });
 
 export const useSettings = () => useContext(SettingsCtx);
 
@@ -47,33 +57,53 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
   const [settings, setSettings] = useState<AppSettings>(DEFAULTS);
 
   useEffect(() => {
+    // 1. Initial immediate load from localStorage so cached settings appear instantly
     try {
       const raw = localStorage.getItem(KEY);
-      // Merged a level down: a settings object saved before the company and
-      // bank blocks existed, or one holding only some of their fields, must
-      // still come back whole rather than with holes in it.
       if (raw) {
         const saved = JSON.parse(raw) as Partial<AppSettings>;
-        setSettings({
-          ...DEFAULTS,
-          ...saved,
-          company: { ...DEFAULTS.company, ...(saved.company ?? {}) },
-          bank: { ...DEFAULTS.bank, ...(saved.bank ?? {}) },
-        });
+        setSettings((prev) => mergeSettings(prev, saved));
       }
     } catch {
       /* ignore */
     }
+
+    // 2. Fetch authoritative business settings from server
+    void reload();
   }, []);
 
-  const save = (s: AppSettings) => {
+  const reload = async () => {
+    try {
+      const fromServer = await api.settings.get();
+      if (fromServer) {
+        setSettings((prev) => {
+          const merged = mergeSettings(prev, fromServer);
+          try {
+            localStorage.setItem(KEY, JSON.stringify(merged));
+          } catch {
+            /* ignore */
+          }
+          return merged;
+        });
+      }
+    } catch {
+      /* offline or network error - use localStorage */
+    }
+  };
+
+  const save = async (s: AppSettings) => {
     setSettings(s);
     try {
       localStorage.setItem(KEY, JSON.stringify(s));
     } catch {
       /* ignore */
     }
+    try {
+      await api.settings.update(s);
+    } catch {
+      /* offline or permission issue */
+    }
   };
 
-  return <SettingsCtx.Provider value={{ settings, save }}>{children}</SettingsCtx.Provider>;
+  return <SettingsCtx.Provider value={{ settings, save, reload }}>{children}</SettingsCtx.Provider>;
 }

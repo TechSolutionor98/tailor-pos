@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Card, Field, NumberInput, SectionTitle, TextInput } from '@/components/ui';
 import { useSettings } from '@/components/SettingsContext';
 import { LogoField } from '@/components/LogoField';
@@ -12,6 +12,10 @@ export default function SettingsPage() {
   const { toast } = useToast();
   const { settings, save } = useSettings();
   const [form, setForm] = useState({ ...settings });
+
+  useEffect(() => {
+    setForm(settings);
+  }, [settings]);
 
   function update<K extends keyof typeof form>(k: K, v: (typeof form)[K]) {
     setForm((f) => ({ ...f, [k]: v }));
@@ -91,13 +95,6 @@ export default function SettingsPage() {
           sub="Printed at the head of every order invoice"
         />
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-          <Field label="Invoice Title" className="sm:col-span-2">
-            <TextInput
-              value={form.invoiceTitle}
-              onChange={(e) => update('invoiceTitle', e.target.value)}
-              placeholder="Order Invoice"
-            />
-          </Field>
           <LogoField
             label="Logo"
             hint="Shown at the top left. A PNG with a transparent background prints best."

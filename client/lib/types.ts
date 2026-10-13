@@ -418,8 +418,8 @@ export interface AppSettings {
   deliveryDays: number;
   company: CompanyDetails;
   bank: BankDetails;
-  /** What the printed sheet calls itself, in red under the masthead. */
-  invoiceTitle: string;
+  /** Optional legacy title override; defaults to static invoice title */
+  invoiceTitle?: string;
 }
 
 export const MEASURE_FIELDS = [

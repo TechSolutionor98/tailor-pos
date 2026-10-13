@@ -1,4 +1,5 @@
 import type {
+  AppSettings,
   AuditEntry,
   AuthUser,
   BulkConvertResult,
@@ -228,5 +229,10 @@ export const api = {
       get<DashboardSummary>(
         `/dashboard/summary?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`,
       ),
+  },
+
+  settings: {
+    get: () => get<AppSettings>('/settings'),
+    update: (body: Partial<AppSettings>) => put<AppSettings>('/settings', body),
   },
 };
