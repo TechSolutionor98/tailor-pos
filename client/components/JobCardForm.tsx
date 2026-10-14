@@ -928,7 +928,9 @@ export function JobCardForm({ initial, mode }: { initial?: JobCard | null; mode:
             <span className="text-sm">⚠️</span>
             <span>This stitching order has been deleted (soft deleted) and is in read-only view.</span>
           </div>
-          <StatusBadge status="deleted" />
+          <span className="inline-flex items-center rounded-md border border-rose-300 bg-rose-100 px-3 py-1 text-xs font-black uppercase tracking-wider text-rose-700 shadow-sm">
+            DELETED
+          </span>
         </div>
       )}
 
@@ -939,7 +941,7 @@ export function JobCardForm({ initial, mode }: { initial?: JobCard | null; mode:
         </div>
       )}
 
-      <div className="grid grid-cols-1 xl:grid-cols-3">
+      <div className={`grid grid-cols-1 xl:grid-cols-3 ${isCompleted ? 'form-completed-dull' : ''}`}>
         <Card className="rounded-none border-x-0 border-t-0 xl:col-span-2 xl:border-r">
           {/* header fields */}
           <section className="p-5">
@@ -965,8 +967,22 @@ export function JobCardForm({ initial, mode }: { initial?: JobCard | null; mode:
                 <p className="text-3xl font-black leading-none tabular-nums text-ink-900">
                   {no ?? '…'}
                 </p>
-                {mode === 'edit' && status && <StatusBadge status={status} />}
               </div>
+              {mode === 'edit' && (
+                <div className="sm:absolute sm:right-0">
+                  {status === 'deleted' ? (
+                    <span className="inline-flex items-center rounded-md border border-rose-300 bg-rose-100 px-3 py-1 text-xs font-black uppercase tracking-wider text-rose-700 shadow-sm">
+                      DELETED
+                    </span>
+                  ) : isCompleted ? (
+                    <span className="inline-flex items-center rounded-md border border-rose-300 bg-rose-100 px-3 py-1 text-xs font-black uppercase tracking-wider text-rose-700 shadow-sm">
+                      COMPLETED
+                    </span>
+                  ) : status ? (
+                    <StatusBadge status={status} />
+                  ) : null}
+                </div>
+              )}
             </div>
 
             {/* One 12-column grid whose spans fill exactly two rows, in the
@@ -1054,9 +1070,10 @@ export function JobCardForm({ initial, mode }: { initial?: JobCard | null; mode:
                   because the book number is what people search back by. */}
               <Field label="&nbsp;" className="sm:col-span-2">
                 <button
-                  className="btn-soft w-full"
+                  className="btn-soft w-full disabled:cursor-not-allowed disabled:opacity-40"
                   onClick={() => { setFindOpen(true); setFindQ(''); setFindRows([]); }}
                   title="Find an earlier order"
+                  disabled={readOnly}
                 >
                   Find
                 </button>
@@ -1408,7 +1425,7 @@ export function JobCardForm({ initial, mode }: { initial?: JobCard | null; mode:
                   onClick={() => {
                     if (docId) router.push(`/job-cards/${docId}/invoice?print=1`);
                   }}
-                  className="btn-primary flex w-full items-center justify-center gap-2 !py-2.5 text-sm font-bold shadow-sm transition hover:scale-[1.01] active:scale-[0.99]"
+                  className="flex w-full items-center justify-center gap-2 rounded-xl bg-ink-900 !py-3 text-sm font-bold text-white shadow-md transition hover:bg-black active:scale-[0.99]"
                   title="Print Order Invoice"
                 >
                   <span className="text-base">🖨</span>
