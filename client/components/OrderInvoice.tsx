@@ -118,8 +118,8 @@ export function OrderInvoice({
   const paymentMethod = modes.length
     ? modes.map((m) => (m === 'bank' ? 'Bank Transfer' : m === 'card' ? 'Card' : 'Cash')).join(' + ')
     : (card.advance || 0) > 0
-    ? (card.paymentMode === 'card' ? 'Card' : card.paymentMode === 'bank' ? 'Bank Transfer' : 'Cash')
-    : 'Unpaid';
+      ? (card.paymentMode === 'card' ? 'Card' : card.paymentMode === 'bank' ? 'Bank Transfer' : 'Cash')
+      : 'Unpaid';
 
   const bankLines = [
     bank.name && `BANK NAME: ${bank.name}`,
@@ -355,7 +355,7 @@ export function OrderInvoice({
             <TotalRow en="Paid Amount" ar="المبلغ المدفوع" value={`AED ${fmt(card.advance)}`} />
             {cashPaid > 0 && <TotalRow en="Cash Amount" ar="مبلغ نقدي" value={`AED ${fmt(cashPaid)}`} />}
             {cardPaid > 0 && <TotalRow en="Card Amount" ar="مبلغ البطاقة" value={`AED ${fmt(cardPaid)}`} />}
-            {bankPaid > 0 && <TotalRow en="Transfer Amount" ar="تحويل بنكي" value={`AED ${fmt(bankPaid)}`} />}
+            {bankPaid > 0 && <TotalRow en="Bank Transfer" ar="تحويل بنكي" value={`AED ${fmt(bankPaid)}`} />}
             <TotalRow en="Due Amount" ar="المبلغ المستحق" value={`AED ${fmt(card.balance)}`} />
           </tbody>
         </table>

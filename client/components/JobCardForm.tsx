@@ -124,19 +124,23 @@ export function JobCardForm({ initial, mode }: { initial?: JobCard | null; mode:
   const taxRate = settings.taxRate;
 
   // ---- header ----
-  const [no, setNo] = useState<number | null>(initial?.no ?? null);
+  const [no, setNo] = useState<number | null>(mode === 'new' ? null : (initial?.no ?? null));
   const [bookNo, setBookNo] = useState(String(initial?.bookNo ?? settings.bookNo));
-  const [ref, setRef] = useState(initial?.ref ?? '');
-  const [date, setDate] = useState(toISODate(initial?.date) || todayISO());
+  const [ref, setRef] = useState(mode === 'new' ? '' : (initial?.ref ?? ''));
+  const [date, setDate] = useState(
+    mode === 'new' ? todayISO() : (toISODate(initial?.date) || todayISO()),
+  );
   const [deliveryDate, setDeliveryDate] = useState(
-    toISODate(initial?.deliveryDate) || addDaysISO(todayISO(), settings.deliveryDays),
+    mode === 'new'
+      ? addDaysISO(todayISO(), settings.deliveryDays)
+      : (toISODate(initial?.deliveryDate) || addDaysISO(todayISO(), settings.deliveryDays)),
   );
   const [partyName, setPartyName] = useState(initial?.partyName ?? '');
   const [phone, setPhone] = useState(initial?.phone ?? '');
   const [ledgerId, setLedgerId] = useState(initial?.ledgerId ?? '');
   const [isNew, setIsNew] = useState(initial?.isNewCustomer ?? false);
   const [accountsAc, setAccountsAc] = useState(initial?.accountsAc ?? '');
-  const [invoiceNo, setInvoiceNo] = useState(initial?.invoiceNo ?? '');
+  const [invoiceNo, setInvoiceNo] = useState(mode === 'new' ? '' : (initial?.invoiceNo ?? ''));
 
   // ---- grids ----
   // One block per person. Old cards carry a single unnamed set, so lift that
@@ -179,6 +183,7 @@ export function JobCardForm({ initial, mode }: { initial?: JobCard | null; mode:
   const [bank, setBank] = useState(initial?.bank ?? '');
   const [creditCardNo, setCreditCardNo] = useState(initial?.creditCardNo ?? '');
   const [payments, setPayments] = useState<JobCardPayment[]>(() => {
+    if (mode === 'new') return [];
     if (initial?.payments && initial.payments.length > 0) return initial.payments;
     if (initial && num(initial.advance) > 0) {
       return [
@@ -203,7 +208,7 @@ export function JobCardForm({ initial, mode }: { initial?: JobCard | null; mode:
   // What they owe from before this order, shown under their name.
   const [due, setDue] = useState<LedgerDue | null>(null);
   const [neighbours, setNeighbours] = useState({ prev: false, next: false });
-  const [status, setStatus] = useState(initial?.status ?? 'open');
+  const [status, setStatus] = useState(mode === 'new' ? 'open' : (initial?.status ?? 'open'));
 
   // ---- ui ----
   const [saving, setSaving] = useState(false);
@@ -234,7 +239,7 @@ export function JobCardForm({ initial, mode }: { initial?: JobCard | null; mode:
   /** Set when an order line is asked to show the person it is stitched to. */
   const [reveal, setReveal] = useState<{ uid: string; at: number } | null>(null);
   /** Currently active/selected person UID for light green highlighting. */
-  const [activePersonUid, setActivePersonUid] = useState<string>('');
+  const [activePersonUid, setActivePersonUid] = useState<string>(() => sets[0]?.uid ?? '');
   /** The row just opened by the Save under the measurements, ringed briefly. */
   const [freshItem, setFreshItem] = useState(-1);
   const itemRowsRef = useRef<HTMLTableSectionElement>(null);
@@ -243,8 +248,9 @@ export function JobCardForm({ initial, mode }: { initial?: JobCard | null; mode:
   const [findQ, setFindQ] = useState('');
   const [findRows, setFindRows] = useState<JobCard[]>([]);
 
-  const docId = initial?._id;
-  const readOnly = status === 'converted';
+  const docId = mode === 'new' ? undefined : initial?._id;
+  const isCompleted = mode !== 'new' && (status === 'converted' || status === 'closed');
+  const readOnly = mode === 'new' ? false : isCompleted;
 
   // Hide the actions this user cannot perform; the API enforces the same rules.
   const { can } = useAuth();
@@ -915,10 +921,10 @@ export function JobCardForm({ initial, mode }: { initial?: JobCard | null; mode:
   return (
     <div>
 
-
-      {readOnly && (
-        <div className="mb-5 rounded-2xl border border-brand-200 bg-brand-50 px-5 py-3 text-sm font-semibold text-brand-800">
-          This stitching order has been converted to sales{invoiceNo ? ` (Bill ${invoiceNo})` : ''} and is read-only.
+      {mode === 'new' && initial && (
+        <div className="mb-5 flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-brand-200 bg-brand-50 px-5 py-3 text-xs font-semibold text-brand-800">
+          <span>📋 Details copied from Order #{initial.no || initial.ref} ({initial.partyName})</span>
+          <span className="font-normal text-brand-600">A new order number has been assigned. You can review or edit before saving.</span>
         </div>
       )}
 
@@ -929,11 +935,26 @@ export function JobCardForm({ initial, mode }: { initial?: JobCard | null; mode:
             {/* The number the order is called, set over the form rather than
                 boxed in beside the fields: it is read out and quoted, never
                 typed into, so it reads as a title. */}
-            <div className="mb-5 flex items-baseline justify-center gap-3">
-              <p className="text-lg font-extrabold tracking-tight text-ink-900">Order NO:</p>
-              <p className="text-3xl font-black leading-none tabular-nums text-ink-900">
-                {no ?? '…'}
-              </p>
+            <div className="relative mb-5 flex min-h-[38px] flex-wrap items-center justify-between gap-3 sm:justify-center">
+              {mode === 'edit' && initial?._id && (
+                <div className="sm:absolute sm:left-0">
+                  <button
+                    type="button"
+                    onClick={() => router.push(`/job-cards/new?copyFrom=${initial._id}`)}
+                    className="btn-primary inline-flex items-center gap-1.5 rounded-xl px-3.5 py-1.5 text-xs font-bold shadow-sm transition hover:scale-[1.02] active:scale-[0.98]"
+                    title="Create a new stitching order with details from this order"
+                  >
+                    <Icon name="plus" className="h-3.5 w-3.5" />
+                    <span>New Order</span>
+                  </button>
+                </div>
+              )}
+              <div className="flex items-baseline gap-3">
+                <p className="text-lg font-extrabold tracking-tight text-ink-900">Order NO:</p>
+                <p className="text-3xl font-black leading-none tabular-nums text-ink-900">
+                  {no ?? '…'}
+                </p>
+              </div>
             </div>
 
             {/* One 12-column grid whose spans fill exactly two rows, in the
@@ -1368,13 +1389,27 @@ export function JobCardForm({ initial, mode }: { initial?: JobCard | null; mode:
               separately, billed. Both live here so the primary action is beside
               the figures it commits.
             */}
-            {canSave && (
+            {isCompleted ? (
+              <div className="mt-3">
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (docId) router.push(`/job-cards/${docId}/invoice?print=1`);
+                  }}
+                  className="btn-primary flex w-full items-center justify-center gap-2 !py-2.5 text-sm font-bold shadow-sm transition hover:scale-[1.01] active:scale-[0.99]"
+                  title="Print Order Invoice"
+                >
+                  <span className="text-base">🖨</span>
+                  <span>Print Invoice</span>
+                </button>
+              </div>
+            ) : canSave && (
               <div className="mt-3 space-y-2">
                 <div className="grid grid-cols-2 gap-2.5">
                   <button
                     className="btn-soft !py-2 text-[13px]"
                     onClick={() => void save(false)}
-                    disabled={saving || readOnly}
+                    disabled={saving}
                   >
                     {saving
                       ? mode === 'edit'
@@ -1387,7 +1422,7 @@ export function JobCardForm({ initial, mode }: { initial?: JobCard | null; mode:
                   <button
                     className="btn-primary !py-2 text-[13px]"
                     onClick={() => void save(true)}
-                    disabled={saving || readOnly}
+                    disabled={saving}
                   >
                     {saving
                       ? mode === 'edit'
@@ -1398,11 +1433,11 @@ export function JobCardForm({ initial, mode }: { initial?: JobCard | null; mode:
                         : 'Save & Print'}
                   </button>
                 </div>
-                {mode === 'edit' && canConvert && !readOnly && (
+                {mode === 'edit' && canConvert && (
                   <button
                     className="w-full rounded-xl bg-emerald-600 px-4 py-2 text-[13px] font-bold text-white transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-40"
                     onClick={() => void saveAndConvert()}
-                    disabled={saving || readOnly}
+                    disabled={saving}
                     title="Update order and shift all data to New Sale"
                   >
                     {saving ? 'Updating…' : '⚡ Move to Sale'}

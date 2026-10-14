@@ -116,6 +116,14 @@ export default function InvoicePage() {
         <Link href={`/job-cards/${card._id}`} className="btn-soft">
           Edit order
         </Link>
+        <Link
+          href={`/job-cards/new?copyFrom=${card._id}`}
+          className="btn-soft inline-flex items-center gap-1.5"
+          title="Create a new stitching order with details from this order"
+        >
+          <span>＋</span>
+          <span>New order</span>
+        </Link>
         <button className="btn-primary ml-auto" onClick={() => window.print()}>
           🖨 Print / PDF
         </button>
