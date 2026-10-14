@@ -1,9 +1,17 @@
 import type { Metadata } from 'next';
+import { Plus_Jakarta_Sans } from 'next/font/google';
 import './globals.css';
 import { ToastProvider } from '@/components/Toast';
 import { SettingsProvider } from '@/components/SettingsContext';
 import { AuthProvider } from '@/components/AuthContext';
 import { AppShell } from '@/components/AppShell';
+
+const fontSans = Plus_Jakarta_Sans({
+  subsets: ['latin'],
+  weight: ['400', '500', '600', '700', '800'],
+  variable: '--font-sans',
+  display: 'swap',
+});
 
 export const metadata: Metadata = {
   title: 'Tailor POS — All in One',
@@ -12,8 +20,8 @@ export const metadata: Metadata = {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en">
-      <body>
+    <html lang="en" className={fontSans.variable}>
+      <body className={`${fontSans.className} font-sans`}>
         <ToastProvider>
           <AuthProvider>
             <SettingsProvider>

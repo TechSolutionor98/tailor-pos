@@ -1,3 +1,5 @@
+@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Inter:wght@400;500;600;700&display=swap');
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
@@ -27,7 +29,7 @@
     }
   }
   body {
-    @apply bg-white text-ink-800 antialiased;
+    @apply bg-white text-ink-800 antialiased font-sans;
   }
   ::-webkit-scrollbar {
     width: 10px;
