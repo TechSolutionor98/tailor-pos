@@ -1,7 +1,8 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import Link from 'next/link';
 import { api } from '@/lib/api';
 import { addDaysISO, fmt, fmtDate, num, orderNo, todayISO, toISODate } from '@/lib/format';
 import {
@@ -335,10 +336,16 @@ export function JobCardForm({ initial, mode }: { initial?: JobCard | null; mode:
   const margin = useMemo(() => r2(calc.total - totalCost), [calc.total, totalCost]);
 
   const priorDue = useMemo(() => {
-    const all = due?.due ?? 0;
-    const mine = mode === 'edit' ? num(initial?.balance) : 0;
+    if (!due || !ledgerId) return 0;
+    const all = due.due ?? 0;
+    const isSameCustomer = Boolean(
+      mode === 'edit' &&
+      initial?.ledgerId &&
+      String(initial.ledgerId) === String(ledgerId)
+    );
+    const mine = isSameCustomer ? num(initial?.balance) : 0;
     return r2(all - mine);
-  }, [due, mode, initial?.balance]);
+  }, [due, ledgerId, mode, initial?.ledgerId, initial?.balance]);
 
   function loadDoc(d: JobCard) {
     setNo(d.no ?? null);
@@ -601,11 +608,87 @@ export function JobCardForm({ initial, mode }: { initial?: JobCard | null; mode:
   }
 
   /**
-   * Work in a New Order that has not been saved is just gone once the page
-   * changes, so leaving is worth asking about. An order already on file is
-   * not covered — what is on screen there is still on file.
+   * Snapshot of the form state to detect edits in edit mode.
    */
-  const unsaved = mode === 'new' && !settled.current && hasContent();
+  const getSnapshot = useCallback(() => {
+    return JSON.stringify({
+      partyName: (partyName ?? '').trim(),
+      phone: (phone ?? '').trim(),
+      ledgerId: ledgerId || '',
+      bookNo: String(bookNo ?? '').trim(),
+      ref: (ref ?? '').trim(),
+      date: toISODate(date) || '',
+      deliveryDate: toISODate(deliveryDate) || '',
+      discount: num(discount),
+      additionalCharges: num(additionalCharges),
+      jobCost: num(jobCost),
+      split: {
+        cash: num(split.cash),
+        card: num(split.card),
+        bank: num(split.bank),
+      },
+      items: items.map((r) => ({
+        code: (r.code ?? '').trim(),
+        productName: (r.productName ?? '').trim(),
+        qty: num(r.qty),
+        rate: num(r.rate),
+        personUid: r.personUid || '',
+      })),
+      sets: sets.map((s) => ({
+        uid: s.uid || '',
+        name: (s.name ?? '').trim(),
+        stitchingStyle: (s.stitchingStyle ?? '').trim(),
+        age: s.age ?? null,
+        values: Object.fromEntries(
+          Object.entries(s.values ?? {})
+            .map(([k, v]) => [k, String(v ?? '').trim()])
+            .filter(([, v]) => Boolean(v)),
+        ),
+        materials: (s.materials ?? []).map((m) => ({
+          code: (m.code ?? '').trim(),
+          productName: (m.productName ?? '').trim(),
+          qty: num(m.qty),
+          rate: num(m.rate),
+        })),
+      })),
+    });
+  }, [
+    partyName,
+    phone,
+    ledgerId,
+    bookNo,
+    ref,
+    date,
+    deliveryDate,
+    discount,
+    additionalCharges,
+    jobCost,
+    split,
+    items,
+    sets,
+  ]);
+
+  const initialSnapshotRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (mode === 'edit' && initialSnapshotRef.current === null) {
+      initialSnapshotRef.current = getSnapshot();
+    }
+  }, [mode, getSnapshot]);
+
+  /**
+   * Work in an order that has not been saved will be lost if you leave,
+   * so prompt for confirmation on both new orders and modified existing orders.
+   */
+  const isDirty =
+    !settled.current &&
+    (mode === 'new'
+      ? hasContent()
+      : !readOnly &&
+        initialSnapshotRef.current !== null &&
+        initialSnapshotRef.current !== getSnapshot());
+
+  const unsaved = isDirty;
   const leaveGuard = useLeaveGuard(unsaved && !saving);
 
   /**
@@ -742,7 +825,10 @@ export function JobCardForm({ initial, mode }: { initial?: JobCard | null; mode:
           : {}),
       });
     }
-    if (refresh && latest) loadDoc(latest);
+    if (refresh && latest) {
+      loadDoc(latest);
+      initialSnapshotRef.current = null;
+    }
 
     // Remember the details against the customer, so the next order offers
     // them instead of asking again. A failure here must not look like a
@@ -934,12 +1020,6 @@ export function JobCardForm({ initial, mode }: { initial?: JobCard | null; mode:
         </div>
       )}
 
-      {mode === 'new' && initial && (
-        <div className="mb-5 flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-brand-200 bg-brand-50 px-5 py-3 text-xs font-semibold text-brand-800">
-          <span>📋 Details copied from Order #{initial.no || initial.ref} ({initial.partyName})</span>
-          <span className="font-normal text-brand-600">A new order number has been assigned. You can review or edit before saving.</span>
-        </div>
-      )}
 
       <div className={`grid grid-cols-1 xl:grid-cols-3 ${isCompleted ? 'form-completed-dull' : ''}`}>
         <Card className="rounded-none border-x-0 border-t-0 xl:col-span-2 xl:border-r">
@@ -951,15 +1031,14 @@ export function JobCardForm({ initial, mode }: { initial?: JobCard | null; mode:
             <div className="relative mb-5 flex min-h-[38px] flex-wrap items-center justify-between gap-3 sm:justify-center">
               {mode === 'edit' && initial?._id && (
                 <div className="sm:absolute sm:left-0">
-                  <button
-                    type="button"
-                    onClick={() => router.push(`/job-cards/new?copyFrom=${initial._id}`)}
+                  <Link
+                    href={`/job-cards/new?copyFrom=${initial._id}`}
                     className="btn-primary inline-flex items-center gap-1.5 rounded-xl px-3.5 py-1.5 text-xs font-bold shadow-sm transition hover:scale-[1.02] active:scale-[0.98]"
                     title="Create a new stitching order with details from this order"
                   >
                     <Icon name="plus" className="h-3.5 w-3.5" />
                     <span>New Order</span>
-                  </button>
+                  </Link>
                 </div>
               )}
               <div className="flex items-center gap-3">
@@ -1043,7 +1122,7 @@ export function JobCardForm({ initial, mode }: { initial?: JobCard | null; mode:
                         }`}
                       title={
                         priorDue > 0
-                          ? `Opening ${fmt(due.openingBalance)} + unpaid orders ${fmt(due.orderDue)} + unpaid bills ${fmt(due.saleDue)}${mode === 'edit' ? ', less this order' : ''
+                          ? `Opening ${fmt(due.openingBalance)} + unpaid orders ${fmt(due.orderDue)} + unpaid bills ${fmt(due.saleDue)}${mode === 'edit' && initial?.ledgerId && String(initial.ledgerId) === String(ledgerId) ? ', less this order' : ''
                           }`
                           : 'This customer has paid ahead'
                       }
@@ -1425,11 +1504,23 @@ export function JobCardForm({ initial, mode }: { initial?: JobCard | null; mode:
                   onClick={() => {
                     if (docId) router.push(`/job-cards/${docId}/invoice?print=1`);
                   }}
-                  className="flex w-full items-center justify-center gap-2 rounded-xl bg-ink-900 !py-3 text-sm font-bold text-white shadow-md transition hover:bg-black active:scale-[0.99]"
+                  className="group relative flex w-full items-center justify-center gap-2.5 rounded-xl bg-gradient-to-r from-teal-600 via-emerald-600 to-teal-700 hover:from-teal-500 hover:via-emerald-500 hover:to-teal-600 !py-3.5 text-sm font-black text-white shadow-lg shadow-emerald-700/30 hover:shadow-xl hover:shadow-emerald-700/45 ring-1 ring-white/20 transition-all duration-200 hover:scale-[1.01] active:scale-[0.98]"
                   title="Print Order Invoice"
                 >
-                  <span className="text-base">🖨</span>
-                  <span>Print Invoice</span>
+                  <svg
+                    className="h-4 w-4 transition-transform duration-200 group-hover:scale-110"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2.2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  >
+                    <path d="M6 9V2h12v7" />
+                    <path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2" />
+                    <rect width="12" height="8" x="6" y="14" />
+                  </svg>
+                  <span className="tracking-wide">Print Invoice</span>
                 </button>
               </div>
             ) : canSave && (
@@ -1489,11 +1580,12 @@ export function JobCardForm({ initial, mode }: { initial?: JobCard | null; mode:
       <Modal
         open={leaveGuard.asking}
         onClose={leaveGuard.stay}
-        title="This order is not saved"
+        title={mode === 'new' ? 'This order is not saved' : 'Unsaved changes'}
       >
         <p className="text-sm leading-relaxed text-ink-600">
-          Everything written on this order — the customer, the items and the
-          measurements — will be lost if you leave now.
+          {mode === 'new'
+            ? 'Everything written on this order — the customer, the items and the measurements — will be lost if you leave now.'
+            : 'You have unsaved changes on this order. If you leave now, your changes will be lost.'}
         </p>
         <div className="mt-5 flex flex-wrap justify-end gap-2">
           <button className="btn-soft" onClick={leaveGuard.leave}>
