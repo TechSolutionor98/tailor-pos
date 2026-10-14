@@ -209,19 +209,25 @@ export function SaleInvoice({
                     : sale.partyName
                 }
               />
-              <DetailRow en="Email" ar="البريد الإلكتروني" value={customer?.email} />
               <DetailRow en="Phone" ar="رقم الهاتف" value={sale.phone || customer?.phone} />
+              <DetailRow en="Email" ar="البريد الإلكتروني" value={customer?.email} />
             </tbody>
           </table>
           <table className="w-full border-collapse">
             <tbody>
               <DetailRow en="Inv No" ar="رقم الفاتورة" value={`B-${sale.billNo}`} />
+              {sale.bookingNo && (
+                <DetailRow en="Booking No" ar="رقم الحجز" value={String(sale.bookingNo)} />
+              )}
+              {sale.refNo && (
+                <DetailRow en="Ref No" ar="رقم المرجع" value={sale.refNo} />
+              )}
               <DetailRow en="Date" ar="تاريخ الفاتورة" value={fmtDate(sale.billDate)} />
               <DetailRow en="Payment Method" ar="طريقة الدفع" value={paymentMethodLabel} />
             </tbody>
           </table>
         </div>
-        {/* Address, delivery date, and order reference */}
+        {/* Address and delivery date */}
         <table className="w-full border-collapse">
           <tbody>
             <DetailRow en="Cus Add" ar="عنوان العميل" value={formatAddress(customer)} wide />
@@ -230,19 +236,6 @@ export function SaleInvoice({
                 en="Delivery Date"
                 ar="تاريخ التسليم"
                 value={fmtDate(sale.delDate)}
-                wide
-              />
-            )}
-            {(sale.bookingNo || sale.refNo) && (
-              <DetailRow
-                en="Order Ref"
-                ar="مرجع الطلب"
-                value={[
-                  sale.bookingNo && `Book: ${sale.bookingNo}`,
-                  sale.refNo && `Ref: ${sale.refNo}`,
-                ]
-                  .filter(Boolean)
-                  .join(' · ')}
                 wide
               />
             )}

@@ -203,13 +203,19 @@ export function OrderInvoice({
                     : card.partyName
                 }
               />
-              <DetailRow en="Email" ar="البريد الإلكتروني" value={customer?.email} />
               <DetailRow en="Phone" ar="رقم الهاتف" value={card.phone || customer?.phone} />
+              <DetailRow en="Email" ar="البريد الإلكتروني" value={customer?.email} />
             </tbody>
           </table>
           <table className="w-full border-collapse">
             <tbody>
-              <DetailRow en="Inv No" ar="رقم الفاتورة" value={orderNo(card)} />
+              <DetailRow en="Odr No" ar="رقم الطلب" value={orderNo(card)} />
+              <DetailRow
+                en="Booking No"
+                ar="رقم الحجز"
+                value={card.bookNo != null ? String(card.bookNo) : undefined}
+              />
+              <DetailRow en="Ref No" ar="رقم المرجع" value={card.ref} />
               <DetailRow en="Date" ar="تاريخ الفاتورة" value={fmtDate(card.date)} />
               <DetailRow en="Payment Method" ar="طريقة الدفع" value={paymentMethod} />
             </tbody>
