@@ -443,12 +443,12 @@ export function SaleInvoice({
             className="mt-[2mm] flex items-center justify-between gap-[3mm] px-[3mm] py-[2mm] text-white print:[print-color-adjust:exact]"
             style={{ backgroundColor: GREEN }}
           >
-            <span className="text-[8pt] font-bold uppercase">Net Amount</span>
+            <span className="text-[8pt] font-bold uppercase">Total Amount (inc VAT)</span>
             <span className="text-[9pt] font-black tabular-nums">
               AED {fmt(sale.netAmount || 0)}
             </span>
             <span className="text-[7pt]" dir="rtl">
-              المبلغ الصافي
+              المبلغ الإجمالي (شامل الضريبة)
             </span>
           </div>
         </div>
