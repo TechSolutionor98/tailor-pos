@@ -249,7 +249,8 @@ export function JobCardForm({ initial, mode }: { initial?: JobCard | null; mode:
   const [findRows, setFindRows] = useState<JobCard[]>([]);
 
   const docId = mode === 'new' ? undefined : initial?._id;
-  const isCompleted = mode !== 'new' && (status === 'converted' || status === 'closed');
+  const isCompleted =
+    mode !== 'new' && (status === 'converted' || status === 'closed' || status === 'deleted');
   const readOnly = mode === 'new' ? false : isCompleted;
 
   // Hide the actions this user cannot perform; the API enforces the same rules.
@@ -921,6 +922,16 @@ export function JobCardForm({ initial, mode }: { initial?: JobCard | null; mode:
   return (
     <div>
 
+      {mode === 'edit' && status === 'deleted' && (
+        <div className="mb-5 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-rose-200 bg-rose-50 px-5 py-3 text-xs font-bold text-rose-800">
+          <div className="flex items-center gap-2">
+            <span className="text-sm">⚠️</span>
+            <span>This stitching order has been deleted (soft deleted) and is in read-only view.</span>
+          </div>
+          <StatusBadge status="deleted" />
+        </div>
+      )}
+
       {mode === 'new' && initial && (
         <div className="mb-5 flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-brand-200 bg-brand-50 px-5 py-3 text-xs font-semibold text-brand-800">
           <span>📋 Details copied from Order #{initial.no || initial.ref} ({initial.partyName})</span>
@@ -949,11 +960,12 @@ export function JobCardForm({ initial, mode }: { initial?: JobCard | null; mode:
                   </button>
                 </div>
               )}
-              <div className="flex items-baseline gap-3">
+              <div className="flex items-center gap-3">
                 <p className="text-lg font-extrabold tracking-tight text-ink-900">Order NO:</p>
                 <p className="text-3xl font-black leading-none tabular-nums text-ink-900">
                   {no ?? '…'}
                 </p>
+                {mode === 'edit' && status && <StatusBadge status={status} />}
               </div>
             </div>
 

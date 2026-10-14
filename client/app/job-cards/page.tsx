@@ -1,6 +1,6 @@
 'use client';
 
-import { Suspense, useCallback, useEffect, useState } from 'react';
+import { Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { api } from '@/lib/api';
@@ -11,6 +11,134 @@ import { useToast } from '@/components/Toast';
 import { useAuth } from '@/components/AuthContext';
 import { useSettings } from '@/components/SettingsContext';
 import { ChangeLog } from '@/components/ChangeLog';
+import { AnchoredDropdown } from '@/components/AnchoredDropdown';
+
+function OrderActionMenu({
+  order,
+  canConvert,
+  canEdit,
+  onDeleted,
+}: {
+  order: JobCard;
+  canConvert: boolean;
+  canEdit: boolean;
+  onDeleted: () => void;
+}) {
+  const router = useRouter();
+  const { toast } = useToast();
+  const [open, setOpen] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const anchorRef = useRef<HTMLDivElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const away = (e: MouseEvent) => {
+      const t = e.target as Node;
+      if (anchorRef.current?.contains(t) || panelRef.current?.contains(t)) return;
+      setOpen(false);
+    };
+    const key = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setOpen(false);
+    };
+    document.addEventListener('mousedown', away);
+    document.addEventListener('keydown', key);
+    return () => {
+      document.removeEventListener('mousedown', away);
+      document.removeEventListener('keydown', key);
+    };
+  }, [open]);
+
+  const handleDelete = async () => {
+    setOpen(false);
+    const numStr = order.no ?? order.ref;
+    if (!window.confirm(`Are you sure you want to delete stitching order #${numStr}?`)) {
+      return;
+    }
+    setDeleting(true);
+    try {
+      await api.jobCards.delete(order._id);
+      toast(`Order #${numStr} deleted successfully`, 'success');
+      onDeleted();
+    } catch (e) {
+      toast(e instanceof Error ? e.message : 'Failed to delete order', 'error');
+    } finally {
+      setDeleting(false);
+    }
+  };
+
+  return (
+    <div ref={anchorRef} className="relative inline-block text-left" onClick={(e) => e.stopPropagation()}>
+      <button
+        type="button"
+        className="btn-soft inline-flex items-center gap-1.5 !px-2.5 !py-1 text-xs font-semibold"
+        onClick={() => setOpen((prev) => !prev)}
+        aria-expanded={open}
+        disabled={deleting}
+      >
+        <span>Action</span>
+        <span className="text-[10px] text-ink-500">▾</span>
+      </button>
+
+      <AnchoredDropdown anchorRef={anchorRef} panelRef={panelRef} open={open} width={168} direction="auto">
+        <div className="py-1 text-ink-800">
+          <button
+            type="button"
+            className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs font-medium transition hover:bg-brand-50 hover:text-brand-800"
+            onClick={() => {
+              setOpen(false);
+              router.push(`/job-cards/${order._id}`);
+            }}
+          >
+            <span className="text-sm">✏️</span>
+            <span>{order.status === 'deleted' ? 'View' : 'Edit'}</span>
+          </button>
+
+          {canConvert && order.status !== 'deleted' && (
+            <button
+              type="button"
+              className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs font-medium text-emerald-700 transition hover:bg-emerald-50 hover:text-emerald-800"
+              onClick={() => {
+                setOpen(false);
+                router.push(`/sales/new?fromJobCard=${order._id}`);
+              }}
+              title="Shift this stitching order into New Sale"
+            >
+              <span className="text-sm">⚡</span>
+              <span>Move to Sale</span>
+            </button>
+          )}
+
+          <button
+            type="button"
+            className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs font-medium transition hover:bg-brand-50 hover:text-brand-800"
+            onClick={() => {
+              setOpen(false);
+              router.push(`/job-cards/${order._id}/invoice?print=1`);
+            }}
+          >
+            <span className="text-sm">🖨</span>
+            <span>Print</span>
+          </button>
+
+          {canEdit && order.status !== 'deleted' && (
+            <>
+              <div className="my-1 border-t border-ink-100" />
+              <button
+                type="button"
+                className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs font-medium text-rose-600 transition hover:bg-rose-50 hover:text-rose-700"
+                onClick={handleDelete}
+              >
+                <span className="text-sm">🗑</span>
+                <span>Delete</span>
+              </button>
+            </>
+          )}
+        </div>
+      </AnchoredDropdown>
+    </div>
+  );
+}
 
 function JobCardsInner() {
   const { toast } = useToast();
@@ -18,6 +146,7 @@ function JobCardsInner() {
   const { settings } = useSettings();
   const canManage = can('jobcards.create');
   const canConvert = can('jobcards.convert');
+  const canEdit = can('jobcards.edit');
   // The log is the owner's view of who touched what — role, not a permission.
   const isSuperAdmin = user?.role === 'super_admin';
   const router = useRouter();
@@ -140,6 +269,7 @@ function JobCardsInner() {
               { value: 'open', label: 'Open' },
               { value: 'closed', label: 'Closed' },
               { value: 'converted', label: 'Converted' },
+              { value: 'deleted', label: 'Deleted' },
             ]}
             value={status}
             onChange={setStatus}
@@ -191,11 +321,11 @@ function JobCardsInner() {
           </div>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full">
+            <table className="w-full min-w-[1150px] border-collapse">
               <thead>
                 <tr className="border-b border-ink-100 bg-ink-50/60">
                   {canConvert && (
-                    <th className="th w-10">
+                    <th className="th sticky left-0 z-20 w-12 min-w-[48px] max-w-[48px] bg-ink-50 text-center">
                       <input
                         type="checkbox"
                         checked={allPicked}
@@ -206,87 +336,98 @@ function JobCardsInner() {
                       />
                     </th>
                   )}
-                  <th className="th">Invoice No</th>
-                  <th className="th">Ref</th>
-                  <th className="th">Customer</th>
-                  <th className="th">Phone</th>
-                  <th className="th">Date</th>
-                  <th className="th">Delivery</th>
-                  <th className="th text-right">Total</th>
-                  <th className="th text-right">Advance</th>
-                  <th className="th text-right">Balance</th>
-                  <th className="th">Status</th>
-                  <th className="th text-right">Actions</th>
+                  <th
+                    className={`th sticky z-20 w-32 min-w-[120px] bg-ink-50 border-r border-ink-200/80 shadow-[3px_0_6px_-2px_rgba(0,0,0,0.06)] ${
+                      canConvert ? 'left-12' : 'left-0'
+                    }`}
+                  >
+                    Invoice No
+                  </th>
+                  <th className="th min-w-[100px]">Ref</th>
+                  <th className="th min-w-[160px]">Customer</th>
+                  <th className="th min-w-[120px]">Phone</th>
+                  <th className="th min-w-[100px]">Date</th>
+                  <th className="th min-w-[100px]">Delivery</th>
+                  <th className="th text-right min-w-[100px]">Total</th>
+                  <th className="th text-right min-w-[100px]">Advance</th>
+                  <th className="th text-right min-w-[100px]">Balance</th>
+                  <th className="th min-w-[110px]">Status</th>
+                  <th className="th sticky right-0 z-20 w-28 min-w-[110px] bg-ink-50 text-right border-l border-ink-200/80 shadow-[-3px_0_6px_-2px_rgba(0,0,0,0.06)]">
+                    Actions
+                  </th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-ink-50">
-                {rows.map((j) => (
-                  <tr
-                    key={j._id}
-                    // The row is the order: clicking any of it opens it. The
-                    // tick box, the number and the two actions keep their own
-                    // jobs, so none of them has to fight the row for a click.
-                    onClick={(e) => {
-                      const el = e.target as HTMLElement;
-                      if (el.closest('a, button, input, label')) return;
-                      router.push(`/job-cards/${j._id}`);
-                    }}
-                    className="cursor-pointer transition hover:bg-brand-50/50"
-                  >
-                    {canConvert && (
-                      <td className="td">
-                        <input
-                          type="checkbox"
-                          checked={selected.includes(j._id)}
-                          disabled={j.status !== 'open'}
-                          onChange={() => toggle(j._id)}
-                          className="h-4 w-4 rounded border-ink-300 text-brand-600 focus:ring-brand-500 disabled:opacity-40"
-                          aria-label={`Select order ${orderNo(j)}`}
+                {rows.map((j) => {
+                  const isDel = j.status === 'deleted';
+                  const cellBg = isDel
+                    ? 'bg-[#FFF5F5] group-hover:bg-[#FFE8E8]'
+                    : 'bg-white group-hover:bg-brand-50';
+
+                  return (
+                    <tr
+                      key={j._id}
+                      onClick={(e) => {
+                        const el = e.target as HTMLElement;
+                        if (el.closest('a, button, input, label')) return;
+                        router.push(`/job-cards/${j._id}`);
+                      }}
+                      className={`group cursor-pointer transition ${
+                        isDel ? 'text-ink-600' : ''
+                      }`}
+                    >
+                      {canConvert && (
+                        <td
+                          className={`td sticky left-0 z-10 w-12 min-w-[48px] max-w-[48px] text-center transition-colors ${cellBg}`}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={selected.includes(j._id)}
+                            disabled={j.status !== 'open'}
+                            onChange={() => toggle(j._id)}
+                            className="h-4 w-4 rounded border-ink-300 text-brand-600 focus:ring-brand-500 disabled:opacity-40"
+                            aria-label={`Select order ${orderNo(j)}`}
+                          />
+                        </td>
+                      )}
+                      <td
+                        className={`td sticky z-10 w-32 min-w-[120px] border-r border-ink-200/80 shadow-[3px_0_6px_-2px_rgba(0,0,0,0.06)] transition-colors ${
+                          canConvert ? 'left-12' : 'left-0'
+                        } ${cellBg}`}
+                      >
+                        <Link
+                          href={`/job-cards/${j._id}`}
+                          className={`font-extrabold hover:underline ${
+                            isDel ? 'text-rose-700 line-through' : 'text-brand-700'
+                          }`}
+                        >
+                          {orderNo(j)}
+                        </Link>
+                      </td>
+                      <td className={`td font-mono text-xs text-ink-500 transition-colors ${cellBg}`}>{j.ref}</td>
+                      <td className={`td font-semibold transition-colors ${cellBg}`}>{j.partyName || '—'}</td>
+                      <td className={`td font-mono text-xs transition-colors ${cellBg}`}>{j.phone || '—'}</td>
+                      <td className={`td transition-colors ${cellBg}`}>{fmtDate(j.date)}</td>
+                      <td className={`td transition-colors ${cellBg}`}>{fmtDate(j.deliveryDate)}</td>
+                      <td className={`td text-right font-bold tabular-nums transition-colors ${cellBg}`}>{fmt(j.netAmount)}</td>
+                      <td className={`td text-right tabular-nums text-emerald-600 transition-colors ${cellBg}`}>{fmt(j.advance)}</td>
+                      <td className={`td text-right font-bold tabular-nums text-brass-600 transition-colors ${cellBg}`}>{fmt(j.balance)}</td>
+                      <td className={`td transition-colors ${cellBg}`}>
+                        <StatusBadge status={j.status} />
+                      </td>
+                      <td
+                        className={`td sticky right-0 z-10 w-28 min-w-[110px] text-right border-l border-ink-200/80 shadow-[-3px_0_6px_-2px_rgba(0,0,0,0.06)] transition-colors ${cellBg}`}
+                      >
+                        <OrderActionMenu
+                          order={j}
+                          canConvert={canConvert}
+                          canEdit={canEdit}
+                          onDeleted={() => void load(q, status)}
                         />
                       </td>
-                    )}
-                    <td className="td">
-                      <Link href={`/job-cards/${j._id}`} className="font-extrabold text-brand-700 hover:underline">
-                        {orderNo(j)}
-                      </Link>
-                    </td>
-                    <td className="td font-mono text-xs text-ink-500">{j.ref}</td>
-                    <td className="td font-semibold">{j.partyName || '—'}</td>
-                    <td className="td font-mono text-xs">{j.phone || '—'}</td>
-                    <td className="td">{fmtDate(j.date)}</td>
-                    <td className="td">{fmtDate(j.deliveryDate)}</td>
-                    <td className="td text-right font-bold tabular-nums">{fmt(j.netAmount)}</td>
-                    <td className="td text-right tabular-nums text-emerald-600">{fmt(j.advance)}</td>
-                    <td className="td text-right font-bold tabular-nums text-brass-600">{fmt(j.balance)}</td>
-                    <td className="td">
-                      <StatusBadge status={j.status} />
-                    </td>
-                    <td className="td text-right">
-                      <div className="flex items-center justify-end gap-2">
-                        {/* Printing is the common errand from this list, so it
-                            is one press from here rather than a trip through
-                            the order. */}
-                        <Link
-                          href={`/job-cards/${j._id}/invoice?print=1`}
-                          className="btn-soft !py-1 !px-2.5 text-[11px]"
-                          title={`Print the invoice for order ${orderNo(j)}`}
-                        >
-                          🖨 Invoice
-                        </Link>
-                        {canConvert && j.status === 'open' && (
-                          <button
-                            className="btn-success !py-1 !px-2.5 text-[11px]"
-                            onClick={() => void convert([j._id])}
-                            disabled={converting}
-                            title={`Convert order ${orderNo(j)} to a sales bill`}
-                          >
-                            Convert →
-                          </button>
-                        )}
-                      </div>
-                    </td>
-                  </tr>
-                ))}
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>

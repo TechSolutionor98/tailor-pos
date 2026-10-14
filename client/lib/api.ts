@@ -202,6 +202,7 @@ export const api = {
     convertBulk: (ids: string[], body: { salesman?: string; taxRate?: number } = {}) =>
       post<BulkConvertResult>('/jobcards/convert-bulk', { ids, ...body }),
     payments: () => get<{ items: FlatPayment[] }>('/jobcards/payments/all'),
+    delete: (id: string) => del<{ ok: boolean }>(`/jobcards/${id}`),
   },
 
   sales: {

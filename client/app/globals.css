@@ -134,6 +134,9 @@
   .badge-converted {
     @apply badge bg-ink-200 text-ink-700;
   }
+  .badge-deleted {
+    @apply badge bg-rose-100 text-rose-700;
+  }
   .badge-muted {
     @apply badge bg-ink-100 text-ink-600;
   }

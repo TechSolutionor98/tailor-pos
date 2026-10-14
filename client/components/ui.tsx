@@ -207,6 +207,8 @@ export function StatusBadge({ status }: { status: string }) {
       ? 'badge-open'
       : status === 'closed'
         ? 'badge-closed'
-        : 'badge-converted';
+        : status === 'deleted'
+          ? 'badge-deleted'
+          : 'badge-converted';
   return <span className={cls}>{status}</span>;
 }

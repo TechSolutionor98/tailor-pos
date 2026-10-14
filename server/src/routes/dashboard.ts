@@ -55,9 +55,8 @@ dashboardRouter.get(
   asyncHandler(async (req, res) => {
     const { start, end } = resolveRange(req.query.from, req.query.to);
     const billRange = { billDate: { $gte: start, $lte: end } };
-    // A draft is an abandoned half-filled form, not work taken on, so it is
-    // left out of every count and list on this screen.
-    const cardRange = { date: { $gte: start, $lte: end }, status: { $ne: 'draft' } };
+    // Drafts and deleted orders are left out of active order counts on the dashboard.
+    const cardRange = { date: { $gte: start, $lte: end }, status: { $nin: ['draft', 'deleted'] } };
 
     const [
       salesAgg,

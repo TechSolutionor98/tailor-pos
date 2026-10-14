@@ -202,7 +202,7 @@ export interface MeasurementProfile {
   ledgerType?: string;
 }
 
-export type JobCardStatus = 'open' | 'closed' | 'converted';
+export type JobCardStatus = 'open' | 'closed' | 'converted' | 'deleted';
 
 export interface JobCard {
   _id: string;
@@ -240,6 +240,9 @@ export interface JobCard {
   payments: JobCardPayment[];
   status: JobCardStatus;
   closedAt?: string;
+  isDeleted?: boolean;
+  deletedAt?: string;
+  deletedBy?: string;
 }
 
 export interface SaleItem {

@@ -44,8 +44,7 @@ export interface IJobCardPayment {
   swift?: string;
 }
 
-/** 'draft' is an order abandoned part-finished — it is not real work yet. */
-export type JobCardStatus = 'draft' | 'open' | 'closed' | 'converted';
+export type JobCardStatus = 'draft' | 'open' | 'closed' | 'converted' | 'deleted';
 
 export interface IJobCard extends Document {
   /** Assigned only when the order becomes real; a draft has none. */
@@ -102,6 +101,9 @@ export interface IJobCard extends Document {
   payments: IJobCardPayment[];
   status: JobCardStatus;
   closedAt?: Date;
+  isDeleted?: boolean;
+  deletedAt?: Date;
+  deletedBy?: string;
 }
 
 const itemSchema = new Schema<IJobCardItem>(
@@ -212,10 +214,13 @@ const jobCardSchema = new Schema<IJobCard>(
     payments: { type: [paymentSchema], default: [] },
     status: {
       type: String,
-      enum: ['draft', 'open', 'closed', 'converted'],
+      enum: ['draft', 'open', 'closed', 'converted', 'deleted'],
       default: 'open',
     },
     closedAt: Date,
+    isDeleted: { type: Boolean, default: false },
+    deletedAt: Date,
+    deletedBy: String,
   },
   { timestamps: true },
 );

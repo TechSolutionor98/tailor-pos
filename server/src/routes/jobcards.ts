@@ -411,6 +411,8 @@ jobCardRouter.put(
     if (!existing) throw new HttpError(404, 'Order not found');
     if (existing.status === 'converted')
       throw new HttpError(400, 'Converted orders cannot be edited');
+    if (existing.status === 'deleted')
+      throw new HttpError(400, 'Deleted orders cannot be edited');
 
     // Taken before any field is touched — this is the 'from' side of the log.
     const before = snapshotJobCard(existing.toObject());
@@ -490,6 +492,33 @@ jobCardRouter.put(
       changes: diffSnapshots(before, snapshotJobCard(existing.toObject())),
     });
     res.json(existing);
+  }),
+);
+
+// DELETE /jobcards/:id (soft delete)
+jobCardRouter.delete(
+  '/:id',
+  requirePerm('jobcards.edit'),
+  asyncHandler(async (req, res) => {
+    const existing = await JobCard.findById(req.params.id);
+    if (!existing) throw new HttpError(404, 'Stitching order not found');
+
+    const before = snapshotJobCard(existing.toObject());
+    existing.status = 'deleted';
+    existing.isDeleted = true;
+    existing.deletedAt = new Date();
+    // @ts-ignore
+    existing.deletedBy = req.user?.username || req.user?.name || req.user?.id;
+    await existing.save();
+
+    await recordAudit(req, {
+      action: 'delete',
+      doc: existing,
+      changes: diffSnapshots(before, snapshotJobCard(existing.toObject())),
+      summary: `Order #${existing.no ?? existing.ref} deleted (status: deleted)`,
+    });
+
+    res.json({ ok: true, message: 'Order deleted successfully' });
   }),
 );
 

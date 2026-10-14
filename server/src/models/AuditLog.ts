@@ -13,7 +13,8 @@ export type AuditAction =
   | 'payment'
   | 'close'
   | 'reopen'
-  | 'convert';
+  | 'convert'
+  | 'delete';
 
 export interface IAuditLog extends Document {
   entity: 'jobcard';
@@ -50,7 +51,7 @@ const auditLogSchema = new Schema<IAuditLog>(
     partyName: String,
     action: {
       type: String,
-      enum: ['create', 'update', 'payment', 'close', 'reopen', 'convert'],
+      enum: ['create', 'update', 'payment', 'close', 'reopen', 'convert', 'delete'],
       required: true,
     },
     summary: String,
