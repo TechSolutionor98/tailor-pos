@@ -356,15 +356,19 @@ export function OrderInvoice({
       {/* what it comes to: what has been settled on the left, how the figure
           was arrived at on the right */}
       <div className="mt-[3mm] grid grid-cols-2 items-start gap-x-[8mm]">
-        <table className="w-full border-collapse">
-          <tbody>
-            <TotalRow en="Paid Amount" ar="المبلغ المدفوع" value={`AED ${fmt(card.advance)}`} />
-            {cashPaid > 0 && <TotalRow en="Cash Amount" ar="مبلغ نقدي" value={`AED ${fmt(cashPaid)}`} />}
-            {cardPaid > 0 && <TotalRow en="Card Amount" ar="مبلغ البطاقة" value={`AED ${fmt(cardPaid)}`} />}
-            {bankPaid > 0 && <TotalRow en="Bank Transfer" ar="تحويل بنكي" value={`AED ${fmt(bankPaid)}`} />}
-            <TotalRow en="Due Amount" ar="المبلغ المستحق" value={`AED ${fmt(card.balance)}`} />
-          </tbody>
-        </table>
+        {card.status !== 'converted' ? (
+          <table className="w-full border-collapse">
+            <tbody>
+              <TotalRow en="Paid Amount" ar="المبلغ المدفوع" value={`AED ${fmt(card.advance)}`} />
+              {cashPaid > 0 && <TotalRow en="Cash Amount" ar="مبلغ نقدي" value={`AED ${fmt(cashPaid)}`} />}
+              {cardPaid > 0 && <TotalRow en="Card Amount" ar="مبلغ البطاقة" value={`AED ${fmt(cardPaid)}`} />}
+              {bankPaid > 0 && <TotalRow en="Bank Transfer" ar="تحويل بنكي" value={`AED ${fmt(bankPaid)}`} />}
+              <TotalRow en="Due Amount" ar="المبلغ المستحق" value={`AED ${fmt(card.balance)}`} />
+            </tbody>
+          </table>
+        ) : (
+          <div />
+        )}
 
         <div>
           <table className="w-full border-collapse">

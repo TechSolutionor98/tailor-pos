@@ -1116,7 +1116,7 @@ export function JobCardForm({ initial, mode }: { initial?: JobCard | null; mode:
                 </div>
 
                 <div className="mt-1 min-h-[20px]">
-                  {due && priorDue !== 0 ? (
+                  {due && priorDue !== 0 && status !== 'converted' ? (
                     <p
                       className={`text-[11px] font-bold ${priorDue > 0 ? 'text-rose-600' : 'text-brand-700'
                         }`}
@@ -1448,7 +1448,7 @@ export function JobCardForm({ initial, mode }: { initial?: JobCard | null; mode:
                 folding an earlier debt into it would put the wrong figure on
                 this invoice and charge tax on it a second time. */}
             <div className="mt-1.5 flex items-center justify-between gap-3 text-xs font-bold">
-              {priorDue > 0 ? (
+              {priorDue > 0 && status !== 'converted' ? (
                 <span className="text-rose-600">Due Balance: {fmt(priorDue)} AED</span>
               ) : (
                 <span />
@@ -1463,21 +1463,21 @@ export function JobCardForm({ initial, mode }: { initial?: JobCard | null; mode:
 
             <div className="mb-3 mt-3 border-t border-ink-100" />
 
-            {calc.advance > 0 && (
+            {calc.advance > 0 && status !== 'converted' && (
               <div className="mb-2.5 flex items-center justify-between gap-3 text-xs font-bold">
                 <span className="text-emerald-700">Already Paid: {fmt(calc.advance)} AED</span>
               </div>
             )}
 
             <SplitTender
-              due={Math.max(calc.balance, 0)}
+              due={status === 'converted' ? 0 : Math.max(calc.balance, 0)}
               value={split}
               onChange={setSplit}
               details={tenderDetails}
               onDetailsChange={setTenderDetails}
               savedCards={savedCards}
               savedBanks={savedBanks}
-              alreadyPaid={advanceBreakdown}
+              alreadyPaid={status === 'converted' ? undefined : advanceBreakdown}
               onClear={handleClearMode}
               onPay={docId && canPay ? () => void paySplit() : undefined}
               disabled={readOnly}
