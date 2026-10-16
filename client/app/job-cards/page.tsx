@@ -18,16 +18,19 @@ function OrderActionMenu({
   canConvert,
   canEdit,
   onDeleted,
+  onUpdated,
 }: {
   order: JobCard;
   canConvert: boolean;
   canEdit: boolean;
   onDeleted: () => void;
+  onUpdated?: () => void;
 }) {
   const router = useRouter();
   const { toast } = useToast();
   const [open, setOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [updating, setUpdating] = useState(false);
   const anchorRef = useRef<HTMLDivElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
 
@@ -48,6 +51,21 @@ function OrderActionMenu({
       document.removeEventListener('keydown', key);
     };
   }, [open]);
+
+  const handlePending = async () => {
+    setOpen(false);
+    const numStr = order.no ?? order.ref;
+    setUpdating(true);
+    try {
+      await api.jobCards.setPending(order._id);
+      toast(`Order #${numStr} status set to Pending (Open)`, 'success');
+      onUpdated?.();
+    } catch (e) {
+      toast(e instanceof Error ? e.message : 'Failed to set order status to pending', 'error');
+    } finally {
+      setUpdating(false);
+    }
+  };
 
   const handleDelete = async () => {
     setOpen(false);
@@ -74,7 +92,7 @@ function OrderActionMenu({
         className="btn-soft inline-flex items-center gap-1.5 !px-2.5 !py-1 text-xs font-semibold"
         onClick={() => setOpen((prev) => !prev)}
         aria-expanded={open}
-        disabled={deleting}
+        disabled={deleting || updating}
       >
         <span>Action</span>
         <span className="text-[10px] text-ink-500">▾</span>
@@ -120,6 +138,23 @@ function OrderActionMenu({
             <span className="text-sm">🖨</span>
             <span>Print</span>
           </button>
+
+          {canEdit && (
+            <button
+              type="button"
+              className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs font-medium text-amber-700 transition hover:bg-amber-50 hover:text-amber-800"
+              onClick={handlePending}
+              disabled={updating}
+            >
+              <span className="text-sm">⏳</span>
+              <span>Pending</span>
+              {order.status === 'open' && (
+                <span className="ml-auto rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-800">
+                  open
+                </span>
+              )}
+            </button>
+          )}
 
           {canEdit && order.status !== 'deleted' && (
             <>
@@ -423,6 +458,7 @@ function JobCardsInner() {
                           canConvert={canConvert}
                           canEdit={canEdit}
                           onDeleted={() => void load(q, status)}
+                          onUpdated={() => void load(q, status)}
                         />
                       </td>
                     </tr>

@@ -667,6 +667,31 @@ jobCardRouter.post(
   }),
 );
 
+// POST /jobcards/:id/pending
+jobCardRouter.post(
+  '/:id/pending',
+  requirePerm('jobcards.edit'),
+  asyncHandler(async (req, res) => {
+    const doc = await JobCard.findById(req.params.id);
+    if (!doc) throw new HttpError(404, 'Stitching order not found');
+    const before = snapshotJobCard(doc.toObject());
+    doc.status = 'open';
+    doc.closedAt = undefined;
+    doc.isDeleted = false;
+    doc.deletedAt = undefined;
+    // @ts-ignore
+    doc.deletedBy = undefined;
+    await doc.save();
+    await recordAudit(req, {
+      action: 'update',
+      doc,
+      changes: diffSnapshots(before, snapshotJobCard(doc.toObject())),
+      summary: `Order #${doc.no ?? doc.ref} marked as Pending (open)`,
+    });
+    res.json(doc);
+  }),
+);
+
 interface ConvertBody {
   payment?: PaymentBody;
   paymentType?: 'cash' | 'credit';
