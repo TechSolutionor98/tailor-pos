@@ -129,6 +129,7 @@ export function SplitTender({
   disabled = false,
   busy = false,
   payLabel = 'Advance',
+  payAmount,
   note,
   alreadyPaid,
   onClear,
@@ -146,6 +147,7 @@ export function SplitTender({
   disabled?: boolean;
   busy?: boolean;
   payLabel?: string;
+  payAmount?: number;
   /** Shown under the button when paying is not possible yet, and why. */
   note?: string;
   /** Advance or past payments already taken on this order by payment mode. */
@@ -158,6 +160,12 @@ export function SplitTender({
   const [showDetails, setShowDetails] = useState(false);
 
   const taken = useMemo(() => splitTotal(value), [value]);
+  const displayAmount =
+    payAmount !== undefined
+      ? payAmount
+      : payLabel === 'Advance'
+        ? taken
+        : (taken > 0 ? taken : due);
   const remaining = Math.max(Math.round((due - taken) * 100) / 100, 0);
   const change = Math.max(Math.round((taken - due) * 100) / 100, 0);
 
@@ -512,12 +520,17 @@ export function SplitTender({
             {busy ? 'Saving…' : payLabel}
           </button>
         ) : (
-          <span className="shrink-0 px-2 text-[11px] font-bold uppercase tracking-wider text-ink-500">
+          <button
+            type="button"
+            onClick={() => remaining > 0 && set(mode, String(num(value[mode]) + remaining))}
+            title="Click to fill amount"
+            className="shrink-0 inline-flex items-center justify-center rounded-xl bg-brand-700 hover:bg-brand-800 active:scale-[0.98] px-3.5 py-1.5 text-xs font-bold uppercase tracking-wider text-white shadow-sm transition"
+          >
             {payLabel}
-          </span>
+          </button>
         )}
         <span className="flex-1 text-right text-sm font-black tabular-nums text-ink-900">
-          {fmt(taken)} <span className="text-xs font-bold text-ink-400">AED</span>
+          {fmt(displayAmount)} <span className="text-xs font-bold text-ink-400">AED</span>
         </span>
       </div>
       {/* Change is only worth a line when there actually is some: handing back

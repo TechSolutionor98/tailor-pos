@@ -592,9 +592,15 @@ export function SaleForm() {
     }
     setSaving(true);
     try {
-      const totalCash = r2(advanceBreakdown.cash + num(split.cash));
-      const totalCard = r2(advanceBreakdown.card + num(split.card));
-      const totalBank = r2(advanceBreakdown.bank + num(split.bank));
+      const tenderTaken = splitTotal(split);
+      const effectiveSplit = { ...split };
+      if (tenderTaken === 0 && calc.dueToPay > 0 && !isReturn) {
+        effectiveSplit.cash = String(calc.dueToPay);
+      }
+
+      const totalCash = r2(advanceBreakdown.cash + num(effectiveSplit.cash));
+      const totalCard = r2(advanceBreakdown.card + num(effectiveSplit.card));
+      const totalBank = r2(advanceBreakdown.bank + num(effectiveSplit.bank));
 
       const activeModesCount = [totalCash > 0, totalCard > 0, totalBank > 0].filter(Boolean).length;
       let method = 'cash';
@@ -606,14 +612,14 @@ export function SaleForm() {
         method = 'bank';
       } else if (totalCash > 0) {
         method = 'cash';
-      } else if (calc.totalPaid === 0) {
+      } else if (r2(totalCash + totalCard + totalBank) === 0) {
         method = 'credit';
       }
 
       const card = tenderDetails.card;
       const bankT = tenderDetails.bank;
-      const usedCard = num(split.card) > 0;
-      const usedBank = num(split.bank) > 0;
+      const usedCard = num(effectiveSplit.card) > 0;
+      const usedBank = num(effectiveSplit.bank) > 0;
 
       const sale = await api.sales.create({
         billDate,
@@ -668,7 +674,7 @@ export function SaleForm() {
         materialTotal: materialCalc.total,
         discountType,
         discountInput: num(discountInput),
-        advanceAmount: calc.totalPaid,
+        advanceAmount: r2(totalCash + totalCard + totalBank),
         paymentMethod: method,
         cashPaid: totalCash,
         cardPaid: totalCard,
@@ -1392,6 +1398,8 @@ export function SaleForm() {
               alreadyPaid={advanceBreakdown}
               onClear={handleClearMode}
               disabled={!canCreate}
+              payLabel="Pay Now"
+              payAmount={splitTotal(split) > 0 ? splitTotal(split) : calc.dueToPay}
               note="Taken when you press Save — it will show as paid on the invoice."
             />
 
