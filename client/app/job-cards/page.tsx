@@ -67,6 +67,21 @@ function OrderActionMenu({
     }
   };
 
+  const handleComplete = async () => {
+    setOpen(false);
+    const numStr = order.no ?? order.ref;
+    setUpdating(true);
+    try {
+      await api.jobCards.complete(order._id);
+      toast(`Order #${numStr} marked as Complete`, 'success');
+      onUpdated?.();
+    } catch (e) {
+      toast(e instanceof Error ? e.message : 'Failed to complete order', 'error');
+    } finally {
+      setUpdating(false);
+    }
+  };
+
   const handleDelete = async () => {
     setOpen(false);
     const numStr = order.no ?? order.ref;
@@ -112,12 +127,24 @@ function OrderActionMenu({
             <span>{order.status === 'deleted' ? 'View' : 'Edit'}</span>
           </button>
 
-          {canConvert && order.status !== 'deleted' && (
+          {canConvert && order.status !== 'deleted' && order.status !== 'delivered' && order.status !== 'converted' && (
             <button
               type="button"
               className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs font-medium text-emerald-700 transition hover:bg-emerald-50 hover:text-emerald-800"
               onClick={() => {
                 setOpen(false);
+                const uninvoiced = (order.items || []).filter((i) => !i.invoiced);
+                const isPartially =
+                  order.status === 'partially_ready' ||
+                  Boolean(order.invoiceNo) ||
+                  (order.items || []).some((i) => i.invoiced || i.completed);
+                if (isPartially && !uninvoiced.some((i) => i.completed)) {
+                  toast(
+                    `Order ${order.ref || order.no} has no ready items to invoice. Please mark items as Complete first.`,
+                    'warning',
+                  );
+                  return;
+                }
                 router.push(`/sales/new?fromJobCard=${order._id}`);
               }}
               title="Shift this stitching order into New Sale"
@@ -139,7 +166,19 @@ function OrderActionMenu({
             <span>Print</span>
           </button>
 
-          {canEdit && (
+          {canEdit && (order.status === 'open' || order.status === 'partially_ready') && (
+            <button
+              type="button"
+              className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs font-medium text-emerald-700 transition hover:bg-emerald-50 hover:text-emerald-800"
+              onClick={handleComplete}
+              disabled={updating}
+            >
+              <span className="text-sm">✓</span>
+              <span>Complete</span>
+            </button>
+          )}
+
+          {canEdit && order.status !== 'open' && (
             <button
               type="button"
               className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs font-medium text-amber-700 transition hover:bg-amber-50 hover:text-amber-800"
@@ -148,11 +187,6 @@ function OrderActionMenu({
             >
               <span className="text-sm">⏳</span>
               <span>Pending</span>
-              {order.status === 'open' && (
-                <span className="ml-auto rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-800">
-                  open
-                </span>
-              )}
             </button>
           )}
 
@@ -227,8 +261,8 @@ function JobCardsInner() {
     return () => clearTimeout(t);
   }, [q, status, load]);
 
-  /** Only an open order can be billed — the rest are done or already invoiced. */
-  const convertible = rows.filter((j) => j.status === 'open');
+  /** Only an open or partially ready order can be billed — the rest are done or already invoiced. */
+  const convertible = rows.filter((j) => j.status === 'open' || j.status === 'partially_ready');
   const allPicked = convertible.length > 0 && selected.length === convertible.length;
 
   const toggle = (id: string) =>
@@ -301,9 +335,11 @@ function JobCardsInner() {
           <Seg
             options={[
               { value: '', label: 'All' },
-              { value: 'open', label: 'Open' },
-              { value: 'closed', label: 'Closed' },
-              { value: 'converted', label: 'Converted' },
+              { value: 'open', label: 'Pending' },
+              { value: 'partially_ready', label: 'Partially Ready' },
+              { value: 'ready', label: 'Ready' },
+              { value: 'closed', label: 'Completed' },
+              { value: 'delivered', label: 'Delivered' },
               { value: 'deleted', label: 'Deleted' },
             ]}
             value={status}
@@ -418,7 +454,7 @@ function JobCardsInner() {
                           <input
                             type="checkbox"
                             checked={selected.includes(j._id)}
-                            disabled={j.status !== 'open'}
+                            disabled={j.status !== 'open' && j.status !== 'partially_ready'}
                             onChange={() => toggle(j._id)}
                             className="h-4 w-4 rounded border-ink-300 text-brand-600 focus:ring-brand-500 disabled:opacity-40"
                             aria-label={`Select order ${orderNo(j)}`}

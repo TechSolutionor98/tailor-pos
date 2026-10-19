@@ -15,14 +15,18 @@ const DEFAULT_TAX_RATE = 5;
 
 function searchFilter(q?: string) {
   if (!q) return {};
-  const rx = new RegExp(q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
+  const trimmed = q.trim();
+  const rx = new RegExp(trimmed.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
   const or: Record<string, unknown>[] = [
     { partyName: rx },
     { phone: rx },
     { jobCardRef: rx },
+    { refNo: rx },
+    { bookingNo: rx },
   ];
-  const asNum = Number(q);
-  if (Number.isFinite(asNum) && q.trim() !== '') or.push({ billNo: asNum });
+  const stripped = trimmed.replace(/^b-?/i, '');
+  const asNum = Number(stripped);
+  if (Number.isFinite(asNum) && stripped !== '') or.push({ billNo: asNum });
   return { $or: or };
 }
 
@@ -39,6 +43,8 @@ interface SaleItemBody {
   taxPercent?: number;
   warranty?: number;
   info?: string;
+  completed?: boolean;
+  status?: string;
 }
 
 interface SaleBody {
@@ -96,10 +102,38 @@ saleRouter.get(
     const filter: Record<string, unknown> = { ...searchFilter(q) };
     if (isReturn === 'true') filter.isReturn = true;
     else if (isReturn === 'false') filter.isReturn = false;
-    const [items, total] = await Promise.all([
+    const [rawItems, total] = await Promise.all([
       Sale.find(filter).sort({ billNo: -1 }).skip((page - 1) * limit).limit(limit).lean(),
       Sale.countDocuments(filter),
     ]);
+
+    const jcIds = rawItems.map((s) => s.jobCardId).filter(Boolean);
+    const jcRefs = rawItems.map((s) => s.jobCardRef).filter(Boolean);
+
+    const jobCards = await JobCard.find({
+      $or: [
+        ...(jcIds.length ? [{ _id: { $in: jcIds } }] : []),
+        ...(jcRefs.length ? [{ ref: { $in: jcRefs } }] : []),
+      ],
+    })
+      .select('_id ref status')
+      .lean();
+
+    const jcMap = new Map<string, string>();
+    for (const jc of jobCards) {
+      if (jc._id) jcMap.set(String(jc._id), jc.status);
+      if (jc.ref) jcMap.set(jc.ref, jc.status);
+    }
+
+    const items = rawItems.map((s) => {
+      const orderStatus =
+        (s.jobCardId && jcMap.get(String(s.jobCardId))) ||
+        (s.jobCardRef && jcMap.get(s.jobCardRef)) ||
+        (s as any).orderStatus ||
+        undefined;
+      return { ...s, orderStatus };
+    });
+
     res.json({ items, total, page, limit });
   }),
 );
@@ -109,7 +143,7 @@ saleRouter.get(
   '/next',
   requirePerm('sales.view'),
   asyncHandler(async (_req, res) => {
-    res.json({ billNo: await peekSeq('sale', 85934) });
+    res.json({ billNo: await peekSeq('sale', 0) });
   }),
 );
 
@@ -149,6 +183,8 @@ saleRouter.post(
           grossAmt,
           warranty: num(i.warranty),
           info: (i.info ?? '').trim(),
+          completed: Boolean(i.completed),
+          status: i.status || 'ready',
         };
       });
 
@@ -258,10 +294,87 @@ saleRouter.post(
     });
 
     if (body.jobCardId) {
-      await JobCard.findByIdAndUpdate(body.jobCardId, {
-        status: 'converted',
-        invoiceNo: `B-${billNo}`,
-      });
+      const jc = await JobCard.findById(body.jobCardId);
+      if (jc) {
+        if (Array.isArray(body.items) && Array.isArray(jc.items)) {
+          for (const soldItem of body.items) {
+            if (soldItem.code === 'EXTRA' || soldItem.productName === 'Additional Charges') {
+              continue;
+            }
+            // Pending items are not yet ready or invoiced on this bill
+            if (soldItem.status === 'pending' || soldItem.completed === false) {
+              continue;
+            }
+            // Find an uninvoiced matching item in jc.items
+            const match = jc.items.find(
+              (it: any) =>
+                !it.invoiced &&
+                ((soldItem.code && it.code && it.code === soldItem.code) ||
+                  (soldItem.productName &&
+                    it.productName &&
+                    it.productName.trim().toLowerCase() === soldItem.productName.trim().toLowerCase())),
+            );
+            if (match) {
+              match.invoiced = true;
+              match.completed = true;
+              match.invoiceNo = String(billNo);
+            }
+          }
+
+          // Cross-reference all linked sales for this order to ensure all sold items are invoiced
+          const linkedSales = await Sale.find({
+            $or: [{ jobCardId: jc._id }, { jobCardRef: jc.ref }],
+          }).lean();
+          const allSoldItems: any[] = linkedSales.flatMap((s: any) =>
+            (s.items || []).map((it: any) => ({ ...it, billNo: s.billNo })),
+          );
+          for (const it of jc.items) {
+            if (!it.invoiced) {
+              const soldMatch = allSoldItems.find(
+                (s: any) =>
+                  !s._matched &&
+                  s.code !== 'EXTRA' &&
+                  s.productName !== 'Additional Charges' &&
+                  s.status !== 'pending' &&
+                  s.completed !== false &&
+                  ((s.code && it.code && s.code === it.code) ||
+                    (s.productName &&
+                      it.productName &&
+                      s.productName.trim().toLowerCase() === it.productName.trim().toLowerCase())),
+              );
+              if (soldMatch) {
+                soldMatch._matched = true;
+                it.invoiced = true;
+                it.completed = true;
+                if (!it.invoiceNo) it.invoiceNo = String(soldMatch.billNo || billNo);
+              }
+            }
+          }
+
+          jc.markModified('items');
+        }
+
+        const allInvoiced = jc.items.length > 0 && jc.items.every((i: any) => i.invoiced);
+        const hasUnfinishedStitching = jc.items.some((i: any) => !i.completed);
+        const hasCompletedItem = jc.items.some((i: any) => i.completed);
+        const hasInvoicedItem = jc.items.some((i: any) => i.invoiced);
+        const hasUninvoicedItem = jc.items.some((i: any) => !i.invoiced);
+
+        if (allInvoiced && !hasUnfinishedStitching) {
+          jc.status = 'delivered';
+        } else if (hasInvoicedItem || hasCompletedItem || hasUninvoicedItem) {
+          jc.status = 'partially_ready';
+        } else {
+          jc.status = 'open';
+        }
+        if (!jc.invoiceNo?.includes(String(billNo))) {
+          jc.invoiceNo = jc.invoiceNo ? `${jc.invoiceNo}, ${billNo}` : String(billNo);
+        }
+        await jc.save();
+
+        sale.orderStatus = jc.status;
+        await sale.save();
+      }
     }
 
     res.status(201).json(sale);
@@ -273,8 +386,20 @@ saleRouter.get(
   '/:id',
   requirePerm('sales.view'),
   asyncHandler(async (req, res) => {
-    const sale = await Sale.findById(req.params.id).lean();
+    const sale: any = await Sale.findById(req.params.id).lean();
     if (!sale) throw new HttpError(404, 'Sale not found');
-    res.json(sale);
+    let orderStatus = sale.orderStatus;
+    if (!orderStatus && (sale.jobCardId || sale.jobCardRef)) {
+      const jc: any = await JobCard.findOne({
+        $or: [
+          ...(sale.jobCardId ? [{ _id: sale.jobCardId }] : []),
+          ...(sale.jobCardRef ? [{ ref: sale.jobCardRef }] : []),
+        ],
+      })
+        .select('status')
+        .lean();
+      if (jc) orderStatus = jc.status;
+    }
+    res.json({ ...sale, orderStatus });
   }),
 );

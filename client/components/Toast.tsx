@@ -2,7 +2,7 @@
 
 import React, { createContext, useCallback, useContext, useState } from 'react';
 
-type ToastKind = 'success' | 'error' | 'info';
+type ToastKind = 'success' | 'error' | 'info' | 'warning';
 
 interface Toast {
   id: number;
@@ -39,10 +39,14 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
                 ? 'bg-brand-700'
                 : t.kind === 'error'
                   ? 'bg-rose-600'
-                  : 'bg-brand-700'
+                  : t.kind === 'warning'
+                    ? 'bg-amber-600'
+                    : 'bg-brand-700'
             }`}
           >
-            <span>{t.kind === 'success' ? '✓' : t.kind === 'error' ? '✕' : 'ℹ'}</span>
+            <span>
+              {t.kind === 'success' ? '✓' : t.kind === 'error' ? '✕' : t.kind === 'warning' ? '⚠️' : 'ℹ'}
+            </span>
             {t.msg}
           </div>
         ))}

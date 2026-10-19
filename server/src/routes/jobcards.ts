@@ -132,6 +132,9 @@ interface JobCardBody {
     qty?: number;
     rate?: number;
     personUid?: string;
+    completed?: boolean;
+    invoiced?: boolean;
+    invoiceNo?: string;
   }[];
   discount?: number;
   taxRate?: number;
@@ -171,6 +174,9 @@ function buildComputed(body: JobCardBody) {
       rate: num(i.rate),
       amount: lineAmount(num(i.qty), num(i.rate)),
       personUid: i.personUid || undefined,
+      completed: Boolean(i.completed),
+      invoiced: Boolean(i.invoiced),
+      invoiceNo: i.invoiceNo || undefined,
     }));
   const totals = jobCardTotals(items, num(body.discount), taxRate, num(body.additionalCharges));
   // Legacy orders kept one shared list; materials now sit on each person.
@@ -240,7 +246,15 @@ jobCardRouter.get(
     const filter: Record<string, unknown> = { ...searchFilter(q) };
     // Drafts are no longer a thing the form can make. Older ones are still on
     // file, but they are not orders and have no business in this list.
-    filter.status = status && status !== 'draft' ? status : { $ne: 'draft' };
+    if (status && status !== 'draft') {
+      if (status === 'delivered') {
+        filter.status = { $in: ['delivered', 'converted'] };
+      } else {
+        filter.status = status;
+      }
+    } else {
+      filter.status = { $ne: 'draft' };
+    }
     const [items, total] = await Promise.all([
       JobCard.find(filter).sort({ no: -1 }).skip((page - 1) * limit).limit(limit).lean(),
       JobCard.countDocuments(filter),
@@ -254,8 +268,8 @@ jobCardRouter.get(
   '/next',
   requirePerm('jobcards.view'),
   asyncHandler(async (_req, res) => {
-    const no = await peekSeq('jobcard', 13258);
-    const bookNo = await peekSeq('book_no', 270);
+    const no = await peekSeq('jobcard', 0);
+    const bookNo = await peekSeq('book_no', 0);
     res.json({ no, ref: `${REF_PREFIX}-${no}`, bookNo });
   }),
 );
@@ -378,7 +392,7 @@ jobCardRouter.post(
       bank: body.bank,
       creditCardNo: body.creditCardNo,
       payments: [],
-      status: 'open',
+      status: computed.items.some((i: any) => i.completed) ? 'partially_ready' : 'open',
     });
     await filePeople(body.ledgerId, body.measurementSets);
     await recordAudit(req, {
@@ -395,8 +409,67 @@ jobCardRouter.get(
   '/:id',
   requirePerm('jobcards.view'),
   asyncHandler(async (req, res) => {
-    const doc = await JobCard.findById(req.params.id).lean();
+    const doc: any = await JobCard.findById(req.params.id).lean();
     if (!doc) throw new HttpError(404, 'Stitching order not found');
+
+    const sales = await Sale.find({
+      $or: [{ jobCardId: doc._id }, { jobCardRef: doc.ref }],
+    }).lean();
+
+    if (sales.length > 0 && Array.isArray(doc.items)) {
+      const soldItems: any[] = sales.flatMap((s: any) => s.items || []);
+      const usedAdvance = sales.reduce((sum: number, s: any) => sum + (s.advanceAmount || 0), 0);
+      (doc as any).remainingAdvance = Math.max(0, r2(num(doc.advance) - usedAdvance));
+
+      for (const item of doc.items as any[]) {
+        if (item.invoiced) continue;
+        const soldMatch = soldItems.find(
+          (s: any) =>
+            !s._matched &&
+            s.code !== 'EXTRA' &&
+            s.productName !== 'Additional Charges' &&
+            s.status !== 'pending' &&
+            s.completed !== false &&
+            ((item.code && s.code && item.code === s.code) ||
+              (item.productName &&
+                s.productName &&
+                item.productName.trim().toLowerCase() === s.productName.trim().toLowerCase())),
+        );
+        if (soldMatch) {
+          soldMatch._matched = true;
+          item.invoiced = true;
+          item.completed = true;
+          if (!item.invoiceNo && soldMatch.billNo) {
+            item.invoiceNo = `B-${soldMatch.billNo}`;
+          }
+        }
+      }
+
+      const allInvoiced = doc.items.length > 0 && doc.items.every((i: any) => i.invoiced);
+      const hasUnfinished = doc.items.some((i: any) => !i.completed || !i.invoiced);
+      const hasInvoicedOrCompleted = doc.items.some((i: any) => i.invoiced || i.completed);
+
+      if (allInvoiced && !doc.items.some((i: any) => !i.completed)) {
+        if (doc.status !== 'delivered' && doc.status !== 'deleted') {
+          doc.status = 'delivered';
+          await JobCard.updateOne(
+            { _id: doc._id },
+            { $set: { status: 'delivered', items: doc.items } },
+          );
+        }
+      } else if (hasInvoicedOrCompleted && hasUnfinished) {
+        if (doc.status !== 'partially_ready' && doc.status !== 'deleted') {
+          doc.status = 'partially_ready';
+          await JobCard.updateOne(
+            { _id: doc._id },
+            { $set: { status: 'partially_ready', items: doc.items } },
+          );
+        }
+      }
+    } else {
+      (doc as any).remainingAdvance = num(doc.advance);
+    }
+
     res.json(doc);
   }),
 );
@@ -409,8 +482,8 @@ jobCardRouter.put(
     const body = (req.body ?? {}) as JobCardBody & { advance?: number };
     const existing = await JobCard.findById(req.params.id);
     if (!existing) throw new HttpError(404, 'Order not found');
-    if (existing.status === 'converted')
-      throw new HttpError(400, 'Converted orders cannot be edited');
+    if (existing.status === 'converted' || existing.status === 'delivered')
+      throw new HttpError(400, 'Delivered orders cannot be edited');
     if (existing.status === 'deleted')
       throw new HttpError(400, 'Deleted orders cannot be edited');
 
@@ -418,6 +491,66 @@ jobCardRouter.put(
     const before = snapshotJobCard(existing.toObject());
 
     const computed = buildComputed(body);
+
+    // 1. Preserve invoiced status from existing items in DB
+    if (Array.isArray(existing.items)) {
+      for (const item of computed.items) {
+        if (!item.invoiced) {
+          const prev = existing.items.find(
+            (e: any) =>
+              e.invoiced &&
+              ((item.code && e.code && item.code === e.code) ||
+                (item.productName &&
+                  e.productName &&
+                  item.productName.trim().toLowerCase() === e.productName.trim().toLowerCase())),
+          );
+          if (prev) {
+            item.invoiced = true;
+            item.completed = true;
+            item.invoiceNo = prev.invoiceNo;
+          }
+        }
+      }
+    }
+
+    // 2. Cross-reference all linked sales for this order
+    const linkedSales = await Sale.find({
+      $or: [{ jobCardId: existing._id }, { jobCardRef: existing.ref }],
+    }).lean();
+    if (linkedSales.length > 0) {
+      const allSold: any[] = linkedSales.flatMap((s: any) =>
+        (s.items || []).map((it: any) => ({ ...it, billNo: s.billNo })),
+      );
+      for (const item of computed.items) {
+        if (!item.invoiced) {
+          const matchSold = allSold.find(
+            (s: any) =>
+              !s._matched &&
+              s.code !== 'EXTRA' &&
+              s.productName !== 'Additional Charges' &&
+              s.status !== 'pending' &&
+              s.completed !== false &&
+              ((item.code && s.code && item.code === s.code) ||
+                (item.productName &&
+                  s.productName &&
+                  item.productName.trim().toLowerCase() === s.productName.trim().toLowerCase())),
+          );
+          if (matchSold) {
+            matchSold._matched = true;
+            item.invoiced = true;
+            item.completed = true;
+            if (!item.invoiceNo && matchSold.billNo) {
+              item.invoiceNo = `B-${matchSold.billNo}`;
+            }
+          }
+        }
+      }
+    }
+
+    const allInvoiced = computed.items.length > 0 && computed.items.every((i: any) => i.invoiced);
+    const hasUninvoicedPending = computed.items.some((i: any) => !i.invoiced || !i.completed);
+    const hasInvoicedOrCompleted = computed.items.some((i: any) => i.invoiced || i.completed);
+
     const paymentsTotal = r2(
       existing.payments.reduce((s: number, p: any) => s + num(p.amount), 0),
     );
@@ -480,10 +613,24 @@ jobCardRouter.put(
       paymentMode: body.paymentMode || existing.paymentMode,
       bank: body.bank ?? existing.bank,
       creditCardNo: body.creditCardNo ?? existing.creditCardNo,
-      // The status is not the form's to move — closing and converting have
-      // their own routes.
-      status: existing.status,
+      // Status transition: if all items are invoiced, status is delivered!
+      status: (() => {
+        if (existing.status === 'deleted') {
+          return existing.status;
+        }
+        if (allInvoiced && !computed.items.some((i: any) => !i.completed)) {
+          return 'delivered';
+        }
+        if (hasInvoicedOrCompleted) {
+          return hasUninvoicedPending ? 'partially_ready' : 'ready';
+        }
+        if (body.status && ['open', 'partially_ready', 'ready', 'closed', 'delivered'].includes(body.status)) {
+          return body.status as any;
+        }
+        return existing.status;
+      })(),
     });
+    existing.markModified('items');
     await existing.save();
     await filePeople(String(existing.ledgerId ?? ''), body.measurementSets);
     await recordAudit(req, {
@@ -620,8 +767,8 @@ jobCardRouter.post(
     const body = (req.body ?? {}) as PaymentBody;
     const doc = await JobCard.findById(req.params.id);
     if (!doc) throw new HttpError(404, 'Stitching order not found');
-    if (doc.status === 'converted')
-      throw new HttpError(400, 'Stitching order already converted to sales');
+    if (doc.status === 'converted' || doc.status === 'delivered')
+      throw new HttpError(400, 'Stitching order already delivered');
     applyPayment(doc, body, DEFAULT_TAX_RATE);
     await doc.save();
     await recordAudit(req, {
@@ -638,15 +785,51 @@ jobCardRouter.post(
 // POST /jobcards/:id/close
 jobCardRouter.post(
   '/:id/close',
-  requirePerm('jobcards.close'),
+  requirePerm('jobcards.edit'),
   asyncHandler(async (req, res) => {
     const doc = await JobCard.findById(req.params.id);
     if (!doc) throw new HttpError(404, 'Stitching order not found');
-    if (doc.status !== 'open') throw new HttpError(400, 'Only open stitching orders can be closed');
+    const before = snapshotJobCard(doc.toObject());
     doc.status = 'closed';
     doc.closedAt = new Date();
+    if (doc.items && doc.items.length > 0) {
+      doc.items.forEach((item: any) => {
+        item.completed = true;
+      });
+    }
     await doc.save();
-    await recordAudit(req, { action: 'close', doc, summary: 'Order closed' });
+    await recordAudit(req, {
+      action: 'close',
+      doc,
+      changes: diffSnapshots(before, snapshotJobCard(doc.toObject())),
+      summary: `Order #${doc.no ?? doc.ref} marked as Complete`,
+    });
+    res.json(doc);
+  }),
+);
+
+// POST /jobcards/:id/complete
+jobCardRouter.post(
+  '/:id/complete',
+  requirePerm('jobcards.edit'),
+  asyncHandler(async (req, res) => {
+    const doc = await JobCard.findById(req.params.id);
+    if (!doc) throw new HttpError(404, 'Stitching order not found');
+    const before = snapshotJobCard(doc.toObject());
+    doc.status = 'closed';
+    doc.closedAt = new Date();
+    if (doc.items && doc.items.length > 0) {
+      doc.items.forEach((item: any) => {
+        item.completed = true;
+      });
+    }
+    await doc.save();
+    await recordAudit(req, {
+      action: 'close',
+      doc,
+      changes: diffSnapshots(before, snapshotJobCard(doc.toObject())),
+      summary: `Order #${doc.no ?? doc.ref} marked as Complete`,
+    });
     res.json(doc);
   }),
 );
@@ -709,8 +892,26 @@ async function convertToSale(doc: any, body: ConvertBody) {
       body.taxRate !== undefined ? num(body.taxRate, DEFAULT_TAX_RATE) : DEFAULT_TAX_RATE;
     if (body.payment) applyPayment(doc, body.payment, taxRate);
 
-    const billNo = await nextSeq('sale');
-    const items = (doc.items as any[]).map((i: any) => {
+    const uninvoiced = ((doc.items as any[]) ?? []).filter((i: any) => !i.invoiced);
+    const isPartiallyProcessed =
+      doc.status === 'partially_ready' ||
+      Boolean(doc.invoiceNo) ||
+      ((doc.items as any[]) ?? []).some((i: any) => i.invoiced || i.completed);
+
+    const finalItems = isPartiallyProcessed
+      ? uninvoiced.filter((i: any) => Boolean(i.completed))
+      : uninvoiced;
+
+    if (finalItems.length === 0) {
+      throw new HttpError(
+        400,
+        isPartiallyProcessed
+          ? 'No completed items ready to invoice in this order. Please mark items as Complete first.'
+          : 'All items in this order have already been invoiced',
+      );
+    }
+
+    const items = finalItems.map((i: any) => {
       const grossAmt = r2(i.amount);
       const taxAmt = r2(grossAmt * (taxRate / 100));
       const netAmount = r2(grossAmt + taxAmt);
@@ -726,6 +927,7 @@ async function convertToSale(doc: any, body: ConvertBody) {
         taxPercent: taxRate,
         taxAmt,
         netAmount,
+        info: i.completed ? 'Ready' : (doc.status === 'partially_ready' ? 'Pending' : undefined),
       };
     });
     const totQty = r2(items.reduce((s: number, i: any) => s + i.qty, 0));
@@ -738,6 +940,7 @@ async function convertToSale(doc: any, body: ConvertBody) {
     const netAmount = r2(grossAmount + taxAmtTotal);
     const advanceAmount = r2(doc.advance);
 
+    const billNo = await nextSeq('sale');
     const sale = await Sale.create({
       billNo,
       billDate: body.billDate ? new Date(body.billDate) : new Date(),
@@ -763,14 +966,30 @@ async function convertToSale(doc: any, body: ConvertBody) {
       isReturn: false,
     });
 
-    doc.status = 'converted';
-    doc.invoiceNo = `B-${billNo}`;
+    for (const it of finalItems) {
+      it.invoiced = true;
+      it.completed = true;
+      it.invoiceNo = `B-${billNo}`;
+    }
+
+    const allInvoiced = (doc.items as any[])?.every((i: any) => i.invoiced);
+    const hasPendingItems = (doc.items as any[])?.some((i: any) => !i.invoiced || !i.completed);
+    if (allInvoiced) {
+      doc.status = 'delivered';
+    } else if (hasPendingItems) {
+      doc.status = 'partially_ready';
+    } else {
+      doc.status = 'ready';
+    }
+    if (!doc.invoiceNo?.includes(`B-${billNo}`)) {
+      doc.invoiceNo = doc.invoiceNo ? `${doc.invoiceNo}, B-${billNo}` : `B-${billNo}`;
+    }
     await doc.save();
 
     return sale;
 }
 
-// POST /jobcards/:id/convert -> creates a Sale, marks the order converted
+// POST /jobcards/:id/convert -> creates a Sale, marks the order delivered
 jobCardRouter.post(
   '/:id/convert',
   requirePerm('jobcards.convert'),
@@ -778,7 +997,7 @@ jobCardRouter.post(
     const body = (req.body ?? {}) as ConvertBody;
     const doc = await JobCard.findById(req.params.id);
     if (!doc) throw new HttpError(404, 'Order not found');
-    if (doc.status === 'converted') throw new HttpError(400, 'Order already converted to sales');
+    if (doc.status === 'converted' || doc.status === 'delivered') throw new HttpError(400, 'Order already converted to sales / delivered');
     if (doc.status === 'draft')
       throw new HttpError(400, 'This order is still a draft — finish and save it first');
     if (body.paymentType === 'cash' && doc.netAmount - doc.advance !== 0)
@@ -824,15 +1043,15 @@ jobCardRouter.post(
           skipped.push({ id, reason: 'Order not found' });
           continue;
         }
-        if (doc.status === 'converted') {
-          skipped.push({ id, no: doc.no, reason: 'Already converted' });
+        if (doc.status === 'converted' || doc.status === 'delivered') {
+          skipped.push({ id, no: doc.no, reason: 'Already delivered' });
           continue;
         }
         if (doc.status === 'draft') {
           skipped.push({ id, no: doc.no, reason: 'Still a draft — finish and save it first' });
           continue;
         }
-        if (doc.status !== 'open') {
+        if (doc.status !== 'open' && doc.status !== 'ready' && doc.status !== 'partially_ready' && doc.status !== 'closed') {
           skipped.push({ id, no: doc.no, reason: 'Reopen the order before converting' });
           continue;
         }

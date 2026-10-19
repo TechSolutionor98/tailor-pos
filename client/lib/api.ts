@@ -198,6 +198,7 @@ export const api = {
     close: (id: string) => post<JobCard>(`/jobcards/${id}/close`),
     reopen: (id: string) => post<JobCard>(`/jobcards/${id}/reopen`),
     setPending: (id: string) => post<JobCard>(`/jobcards/${id}/pending`),
+    complete: (id: string) => post<JobCard>(`/jobcards/${id}/complete`),
     convert: (id: string, body: unknown) =>
       post<{ jobCard: JobCard; sale: Sale }>(`/jobcards/${id}/convert`, body),
     convertBulk: (ids: string[], body: { salesman?: string; taxRate?: number } = {}) =>

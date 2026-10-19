@@ -21,6 +21,8 @@ export interface ISaleItem {
   warranty?: number;
   /** Anything the counter wants printed against the line. */
   info?: string;
+  completed?: boolean;
+  status?: string;
 }
 
 export interface ISale extends Document {
@@ -32,6 +34,7 @@ export interface ISale extends Document {
   creditCardNo?: string;
   jobCardRef?: string;
   jobCardId?: Types.ObjectId;
+  orderStatus?: string;
   /** The stitching order this bill came out of, and the bill's own reference.
       Both are set by the system and are not the counter's to change. */
   bookingNo?: string;
@@ -115,6 +118,8 @@ const saleItemSchema = new Schema<ISaleItem>(
     netAmount: { type: Number, default: 0 },
     warranty: { type: Number, default: 0 },
     info: { type: String, trim: true },
+    completed: { type: Boolean, default: false },
+    status: { type: String, default: 'ready' },
   },
   { _id: false },
 );
@@ -133,6 +138,7 @@ const saleSchema = new Schema<ISale>(
     creditCardNo: String,
     jobCardRef: { type: String, trim: true },
     jobCardId: { type: Schema.Types.ObjectId, ref: 'JobCard' },
+    orderStatus: { type: String, trim: true },
     bookingNo: { type: String, trim: true },
     refNo: { type: String, trim: true },
     salesman: { type: String, default: 'GENERAL' },

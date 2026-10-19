@@ -53,6 +53,9 @@ interface ItemRow {
   rate: string;
   /** The measurement set this line is stitched to, or '' for none. */
   personUid: string;
+  completed?: boolean;
+  invoiced?: boolean;
+  invoiceNo?: string;
 }
 const emptyItem = (personUid = ''): ItemRow => ({
   code: '',
@@ -60,6 +63,7 @@ const emptyItem = (personUid = ''): ItemRow => ({
   qty: '1',
   rate: '',
   personUid,
+  completed: false,
 });
 const r2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100;
 
@@ -161,6 +165,9 @@ export function JobCardForm({ initial, mode }: { initial?: JobCard | null; mode:
         qty: String(i.qty ?? ''),
         rate: String(i.rate ?? ''),
         personUid: i.personUid ?? '',
+        completed: mode === 'new' ? false : Boolean(i.completed),
+        invoiced: mode === 'new' ? false : Boolean(i.invoiced),
+        invoiceNo: mode === 'new' ? undefined : (i.invoiceNo ?? undefined),
       }));
     }
     return [emptyItem(sets[0]?.uid ?? '')];
@@ -251,7 +258,7 @@ export function JobCardForm({ initial, mode }: { initial?: JobCard | null; mode:
 
   const docId = mode === 'new' ? undefined : initial?._id;
   const isCompleted =
-    mode !== 'new' && (status === 'converted' || status === 'closed' || status === 'deleted');
+    mode !== 'new' && (status === 'converted' || status === 'delivered' || status === 'closed' || status === 'deleted');
   const readOnly = mode === 'new' ? false : isCompleted;
 
   // Hide the actions this user cannot perform; the API enforces the same rules.
@@ -367,6 +374,9 @@ export function JobCardForm({ initial, mode }: { initial?: JobCard | null; mode:
           qty: String(i.qty),
           rate: String(i.rate),
           personUid: i.personUid ?? '',
+          completed: Boolean(i.completed),
+          invoiced: Boolean(i.invoiced),
+          invoiceNo: i.invoiceNo ?? '',
         }))
         : [emptyItem()],
     );
@@ -396,6 +406,28 @@ export function JobCardForm({ initial, mode }: { initial?: JobCard | null; mode:
   }
 
   function payload() {
+    const allInvoiced = items.length > 0 && items.every((r) => r.invoiced);
+    const hasUnfinished = items.some((r) => !r.completed);
+    const hasUninvoiced = items.some((r) => !r.invoiced);
+    const hasCompletedItem = items.some((r) => r.completed);
+    const hasInvoicedItem = items.some((r) => r.invoiced);
+    let nextStatus = status;
+    if (status !== 'deleted') {
+      if (allInvoiced && !hasUnfinished) {
+        nextStatus = 'delivered';
+      } else if (hasInvoicedItem && hasUninvoiced) {
+        nextStatus = 'partially_ready';
+      } else if (hasCompletedItem && hasUnfinished) {
+        nextStatus = 'partially_ready';
+      } else if (hasCompletedItem && !hasUnfinished) {
+        nextStatus = 'ready';
+      } else if (allInvoiced) {
+        nextStatus = 'partially_ready';
+      } else if (status === 'partially_ready' || status === 'ready') {
+        nextStatus = 'open';
+      }
+    }
+
     return {
       bookNo: num(bookNo, settings.bookNo),
       ref: ref.trim(),
@@ -407,6 +439,7 @@ export function JobCardForm({ initial, mode }: { initial?: JobCard | null; mode:
       isNewCustomer: isNew,
       accountsAc: accountsAc.trim(),
       invoiceNo: invoiceNo.trim(),
+      status: nextStatus,
       items: calc.rows
         .filter((r) => r.code || r.productName || r.qty || r.rate)
         .map((r) => ({
@@ -414,6 +447,9 @@ export function JobCardForm({ initial, mode }: { initial?: JobCard | null; mode:
           productName: r.productName,
           qty: r.qty,
           rate: r.rate,
+          completed: Boolean(r.completed),
+          invoiced: Boolean(r.invoiced),
+          invoiceNo: r.invoiceNo || undefined,
           // Only a person still on the order counts; one who has been deleted
           // would leave the line pointing at nobody.
           personUid: sets.some((p) => p.uid === r.personUid) ? r.personUid : undefined,
@@ -577,6 +613,17 @@ export function JobCardForm({ initial, mode }: { initial?: JobCard | null; mode:
       const taken = await bookSplit(doc._id, doc.balance, false);
       const what = `Order ${doc.no} updated · Shifting to New Sale`;
       toast(taken > 0 ? `${what} · ${fmt(taken)} AED recorded` : what);
+
+      const uninvoiced = (doc.items || []).filter((i) => !i.invoiced);
+      const isPartially =
+        doc.status === 'partially_ready' ||
+        Boolean(doc.invoiceNo) ||
+        (doc.items || []).some((i) => i.invoiced || i.completed);
+      if (isPartially && !uninvoiced.some((i) => i.completed)) {
+        toast('Order saved. However, no items are marked Complete to invoice yet.', 'warning');
+        router.push('/job-cards');
+        return;
+      }
 
       router.push(`/sales/new?fromJobCard=${doc._id}`);
     } catch (e) {
@@ -968,6 +1015,11 @@ export function JobCardForm({ initial, mode }: { initial?: JobCard | null; mode:
   const updateItem = (i: number, patch: Partial<ItemRow>) =>
     setItems((rows) => rows.map((r, idx) => (idx === i ? { ...r, ...patch } : r)));
 
+  const toggleItemComplete = (i: number) =>
+    setItems((rows) =>
+      rows.map((r, idx) => (idx === i ? { ...r, completed: !r.completed } : r)),
+    );
+
   /**
    * Adding somebody to the order no longer touches the order lines.
    *
@@ -1021,8 +1073,8 @@ export function JobCardForm({ initial, mode }: { initial?: JobCard | null; mode:
       )}
 
 
-      <div className={`grid grid-cols-1 xl:grid-cols-3 ${isCompleted ? 'form-completed-dull' : ''}`}>
-        <Card className="rounded-none border-x-0 border-t-0 xl:col-span-2 xl:border-r">
+      <div className={`flex flex-col xl:flex-row items-start ${isCompleted ? 'form-completed-dull' : ''}`}>
+        <Card className="w-full min-w-0 flex-1 rounded-none border-x-0 border-t-0 xl:border-r">
           {/* header fields */}
           <section className="p-5">
             {/* The number the order is called, set over the form rather than
@@ -1116,7 +1168,7 @@ export function JobCardForm({ initial, mode }: { initial?: JobCard | null; mode:
                 </div>
 
                 <div className="mt-1 min-h-[20px]">
-                  {due && priorDue !== 0 && status !== 'converted' ? (
+                  {due && priorDue !== 0 && status !== 'converted' && status !== 'delivered' ? (
                     <p
                       className={`text-[11px] font-bold ${priorDue > 0 ? 'text-rose-600' : 'text-brand-700'
                         }`}
@@ -1184,20 +1236,28 @@ export function JobCardForm({ initial, mode }: { initial?: JobCard | null; mode:
                 </button>
               )}
             </div>
-            <div className="overflow-x-auto rounded-xl border border-ink-200">
+            <div className="overflow-x-auto rounded-xl border border-ink-200 no-scrollbar">
               <table className="w-full table-fixed">
+                <colgroup>
+                  <col style={{ width: 34 }} />
+                  <col />
+                  <col style={{ width: 56 }} />
+                  <col style={{ width: 80 }} />
+                  <col style={{ width: 136 }} />
+                  <col style={{ width: 76 }} />
+                  {!readOnly && <col style={{ width: mode === 'new' ? 44 : 140 }} />}
+                </colgroup>
                 <thead className="bg-ink-50">
                   <tr>
-                    <th className="th w-10 text-center">Sl</th>
-                    <th className="th">Product</th>
-                    <th className="th w-20 text-right">Qty</th>
-                    <th className="th w-24 text-right">Rate</th>
-                    {/* Not shouted like the figures either side of it: this
-                        column is a statement about the row, not a heading
-                        over a number. */}
-                    <th className="th w-44 text-center normal-case tracking-normal">Attach Size</th>
-                    <th className="th w-24 text-right">Amount</th>
-                    {!readOnly && <th className="th w-10" />}
+                    <th className="th !px-1 py-2 text-center" style={{ width: 34 }}>Sl</th>
+                    <th className="th !px-2 py-2">Product</th>
+                    <th className="th !px-1 py-2 text-right" style={{ width: 56 }}>Qty</th>
+                    <th className="th !px-1 py-2 text-right" style={{ width: 80 }}>Rate</th>
+                    <th className="th !px-1 py-2 text-center normal-case tracking-normal" style={{ width: 136 }}>Attach Size</th>
+                    <th className="th !px-1 py-2 text-right" style={{ width: 76 }}>Amount</th>
+                    {!readOnly && (
+                      <th className="th !px-1 py-2 text-center" style={{ width: mode === 'new' ? 44 : 140 }}>Action</th>
+                    )}
                   </tr>
                 </thead>
                 <tbody ref={itemRowsRef} className="divide-y divide-ink-100">
@@ -1220,11 +1280,11 @@ export function JobCardForm({ initial, mode }: { initial?: JobCard | null; mode:
                           : 'hover:bg-emerald-50/60'
                           } ${freshItem === i ? 'bg-brand-50' : ''}`}
                       >
-                        <td className="td w-10 text-center text-ink-400 font-mono text-xs">{i + 1}</td>
-                        <td className="td">
-                          <div className="flex items-center gap-2 overflow-hidden">
+                        <td className="td !px-1 py-1.5 text-center text-ink-400 font-mono text-xs" style={{ width: 34 }}>{i + 1}</td>
+                        <td className="td !px-2 py-1.5">
+                          <div className="flex items-center gap-1.5 overflow-hidden">
                             {r.code && (
-                              <span className="shrink-0 rounded bg-ink-100 px-1.5 py-0.5 font-mono text-[11px] font-bold text-brand-700">
+                              <span className="shrink-0 rounded bg-ink-100 px-1 py-0.5 font-mono text-[10px] font-bold text-brand-700">
                                 {r.code}
                               </span>
                             )}
@@ -1235,30 +1295,30 @@ export function JobCardForm({ initial, mode }: { initial?: JobCard | null; mode:
                               disabled={readOnly}
                               usableAs="item"
                               allowCreate
-                              placeholder="Type a code or product name…"
-                              className=""
+                              placeholder="Search product…"
+                              className="input-sm !h-8 w-full text-xs font-normal"
                             />
                           </div>
                         </td>
-                        <td className="td w-20">
+                        <td className="td !px-1 py-1.5" style={{ width: 56 }}>
                           <NumberInput
                             value={r.qty}
                             onChange={(e) => updateItem(i, { qty: e.target.value })}
                             onFocus={() => selectAndFocusItem(i, false)}
                             disabled={readOnly}
-                            className="input-sm"
+                            className="input-sm !h-8 !px-1 text-center"
                           />
                         </td>
-                        <td className="td w-24">
+                        <td className="td !px-1 py-1.5" style={{ width: 80 }}>
                           <NumberInput
                             value={r.rate}
                             onChange={(e) => updateItem(i, { rate: e.target.value })}
                             onFocus={() => selectAndFocusItem(i, false)}
                             disabled={readOnly}
-                            className="input-sm"
+                            className="input-sm !h-8 !px-1.5 text-right font-medium"
                           />
                         </td>
-                        <td className="td w-44 text-center overflow-hidden">
+                        <td className="td !px-1 py-1.5 text-center overflow-hidden" style={{ width: 136 }}>
                           <AttachSizePicker
                             people={sets}
                             value={r.personUid}
@@ -1286,16 +1346,53 @@ export function JobCardForm({ initial, mode }: { initial?: JobCard | null; mode:
                             disabled={readOnly}
                           />
                         </td>
-                        <td className="td w-24 text-right font-bold tabular-nums">{fmt(c?.amount ?? 0)}</td>
+                        <td className="td !px-1 py-1.5 text-right font-bold tabular-nums text-xs" style={{ width: 76 }}>{fmt(c?.amount ?? 0)}</td>
                         {!readOnly && (
-                          <td className="td w-10 text-center">
-                            <button
-                              className="text-rose-500 hover:text-rose-700"
-                              onClick={() => removeItem(i)}
-                              title="Remove row"
-                            >
-                              ✕
-                            </button>
+                          <td className="td !px-1 py-1.5 text-center" style={{ width: mode === 'new' ? 44 : 140 }}>
+                            <div className="flex items-center justify-center gap-1">
+                              {mode !== 'new' && (
+                                <div className="flex items-center justify-center gap-1">
+                                  {r.invoiced && (
+                                    <span className="inline-flex items-center gap-0.5 rounded-md bg-teal-50 px-1.5 py-0.5 text-[11px] font-bold text-teal-700 border border-teal-200">
+                                      <span>✓ Invoiced</span>
+                                      {r.invoiceNo && <span className="font-mono text-[9px] text-teal-600">({r.invoiceNo})</span>}
+                                    </span>
+                                  )}
+                                  {(!r.invoiced || !r.completed) && (
+                                    <button
+                                      type="button"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        toggleItemComplete(i);
+                                      }}
+                                      className={`inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-[11px] font-bold transition shadow-sm ${
+                                        r.completed
+                                          ? 'bg-emerald-600 text-white hover:bg-emerald-700 ring-1 ring-emerald-500'
+                                          : 'border border-ink-200 bg-white text-ink-700 hover:border-emerald-500 hover:bg-emerald-50 hover:text-emerald-800'
+                                      }`}
+                                      title={r.completed ? 'Single item completed (Click to undo)' : 'Mark this single order item as complete'}
+                                    >
+                                      <span className="text-xs">{r.completed ? '✓' : '○'}</span>
+                                      <span className="whitespace-nowrap">{r.completed ? 'Completed' : 'Mark Complete'}</span>
+                                    </button>
+                                  )}
+                                </div>
+                              )}
+
+                              {!r.invoiced && (
+                                <button
+                                  type="button"
+                                  className="h-6 w-6 rounded-md text-rose-500 hover:bg-rose-50 hover:text-rose-700 flex items-center justify-center transition shrink-0"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    removeItem(i);
+                                  }}
+                                  title="Remove row"
+                                >
+                                  ✕
+                                </button>
+                              )}
+                            </div>
                           </td>
                         )}
                       </tr>
@@ -1387,7 +1484,7 @@ export function JobCardForm({ initial, mode }: { initial?: JobCard | null; mode:
         </Card>
 
         {/* right payment panel */}
-        <div>
+        <div className="w-full xl:w-[325px] 2xl:w-[340px] shrink-0">
           <Card className="sticky top-16 max-h-[calc(100vh-4rem)] overflow-y-auto rounded-none border-x-0 border-t-0 p-4">
             {/* The chain the counter reads out, in the order the money is
                 actually worked out: what the goods come to, what is added or
@@ -1448,7 +1545,7 @@ export function JobCardForm({ initial, mode }: { initial?: JobCard | null; mode:
                 folding an earlier debt into it would put the wrong figure on
                 this invoice and charge tax on it a second time. */}
             <div className="mt-1.5 flex items-center justify-between gap-3 text-xs font-bold">
-              {priorDue > 0 && status !== 'converted' ? (
+              {priorDue > 0 && status !== 'converted' && status !== 'delivered' ? (
                 <span className="text-rose-600">Due Balance: {fmt(priorDue)} AED</span>
               ) : (
                 <span />
@@ -1463,21 +1560,21 @@ export function JobCardForm({ initial, mode }: { initial?: JobCard | null; mode:
 
             <div className="mb-3 mt-3 border-t border-ink-100" />
 
-            {calc.advance > 0 && status !== 'converted' && (
+            {calc.advance > 0 && status !== 'converted' && status !== 'delivered' && (
               <div className="mb-2.5 flex items-center justify-between gap-3 text-xs font-bold">
                 <span className="text-emerald-700">Already Paid: {fmt(calc.advance)} AED</span>
               </div>
             )}
 
             <SplitTender
-              due={status === 'converted' ? 0 : Math.max(calc.balance, 0)}
+              due={status === 'converted' || status === 'delivered' ? 0 : Math.max(calc.balance, 0)}
               value={split}
               onChange={setSplit}
               details={tenderDetails}
               onDetailsChange={setTenderDetails}
               savedCards={savedCards}
               savedBanks={savedBanks}
-              alreadyPaid={status === 'converted' ? undefined : advanceBreakdown}
+              alreadyPaid={status === 'converted' || status === 'delivered' ? undefined : advanceBreakdown}
               onClear={handleClearMode}
               onPay={docId && canPay ? () => void paySplit() : undefined}
               disabled={readOnly}

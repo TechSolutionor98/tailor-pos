@@ -142,13 +142,22 @@
     @apply badge bg-brand-100 text-brand-800;
   }
   .badge-closed {
-    @apply badge bg-brass-100 text-brass-800;
+    @apply badge bg-emerald-100 text-emerald-900 border border-emerald-300;
   }
   .badge-converted {
     @apply badge bg-ink-200 text-ink-700;
   }
+  .badge-delivered {
+    @apply badge bg-emerald-100 text-emerald-900 border border-emerald-300;
+  }
   .badge-deleted {
     @apply badge bg-rose-100 text-rose-700;
+  }
+  .badge-partially-ready {
+    @apply badge bg-amber-100 text-amber-900 border border-amber-300;
+  }
+  .badge-ready {
+    @apply badge bg-emerald-100 text-emerald-900 border border-emerald-300;
   }
   .badge-muted {
     @apply badge bg-ink-100 text-ink-600;

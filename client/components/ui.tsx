@@ -202,13 +202,34 @@ export function EmptyState({ title, sub }: { title: string; sub?: string }) {
 }
 
 export function StatusBadge({ status }: { status: string }) {
+  const norm = (status || '').toLowerCase().replace(/[\s-]+/g, '_');
   const cls =
-    status === 'open'
+    norm === 'open'
       ? 'badge-open'
-      : status === 'closed'
-        ? 'badge-closed'
-        : status === 'deleted'
-          ? 'badge-deleted'
-          : 'badge-converted';
-  return <span className={cls}>{status}</span>;
+      : norm === 'partially_ready'
+        ? 'badge-partially-ready'
+        : norm === 'ready'
+          ? 'badge-ready'
+          : norm === 'closed'
+            ? 'badge-closed'
+            : norm === 'deleted' || norm === 'return'
+              ? 'badge-deleted'
+              : norm === 'delivered' || norm === 'converted'
+                ? 'badge-delivered'
+                : 'badge-muted';
+  const label =
+    norm === 'open'
+      ? 'Pending'
+      : norm === 'partially_ready'
+        ? 'Partially Ready'
+        : norm === 'ready'
+          ? 'Ready'
+          : norm === 'closed' || norm === 'completed'
+            ? 'Completed'
+            : norm === 'delivered' || norm === 'converted'
+              ? 'Delivered'
+              : norm === 'return'
+                ? 'Return'
+                : status;
+  return <span className={cls}>{label}</span>;
 }

@@ -356,7 +356,7 @@ export function OrderInvoice({
       {/* what it comes to: what has been settled on the left, how the figure
           was arrived at on the right */}
       <div className="mt-[3mm] grid grid-cols-2 items-start gap-x-[8mm]">
-        {card.status !== 'converted' ? (
+        {card.status !== 'converted' && card.status !== 'delivered' ? (
           <table className="w-full border-collapse">
             <tbody>
               <TotalRow en="Paid Amount" ar="المبلغ المدفوع" value={`AED ${fmt(card.advance)}`} />

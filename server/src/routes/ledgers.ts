@@ -55,7 +55,7 @@ async function withDue<T extends LedgerRow>(rows: T[]): Promise<(T & { due: numb
   const ids = rows.map((r) => String(r._id));
   const [orders, sales] = await Promise.all([
     JobCard.aggregate([
-      { $match: { ledgerId: { $in: ids }, status: { $in: ['open', 'closed'] } } },
+      { $match: { ledgerId: { $in: ids }, status: { $in: ['open', 'partially_ready', 'ready', 'closed'] } } },
       { $group: { _id: '$ledgerId', due: { $sum: '$balance' } } },
     ]),
     Sale.aggregate([
@@ -198,7 +198,7 @@ ledgerRouter.get(
     const [orders, sales] = await Promise.all([
       JobCard.find({
         ledgerId: req.params.id,
-        status: { $in: ['open', 'closed'] },
+        status: { $in: ['open', 'partially_ready', 'ready', 'closed'] },
       })
         .select('balance')
         .lean(),

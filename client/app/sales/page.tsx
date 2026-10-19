@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { api } from '@/lib/api';
 import { fmt, fmtDate } from '@/lib/format';
 import type { Sale } from '@/lib/types';
-import { Card, EmptyState, Seg, TextInput } from '@/components/ui';
+import { Card, EmptyState, Seg, StatusBadge, TextInput } from '@/components/ui';
 import { useToast } from '@/components/Toast';
 import { useAuth } from '@/components/AuthContext';
 
@@ -89,14 +89,15 @@ export default function SalesPage() {
             <table className="w-full">
               <thead>
                 <tr className="border-b border-ink-100 bg-ink-50/60">
-                  <th className="th">Bill No</th>
+                  <th className="th">Inv No</th>
                   <th className="th">Date</th>
                   <th className="th">Customer</th>
                   <th className="th">Type</th>
-                  <th className="th">Job Ref</th>
+                  <th className="th">Ref / Job</th>
                   <th className="th text-right">Net Amount</th>
                   <th className="th text-right">Advance</th>
                   <th className="th text-right">Balance</th>
+                  <th className="th text-center">Status</th>
                   <th className="th" />
                 </tr>
               </thead>
@@ -105,19 +106,29 @@ export default function SalesPage() {
                   <tr key={s._id} className="transition hover:bg-brand-50/50">
                     <td className="td">
                       <Link href={`/sales/${s._id}`} className="font-extrabold text-brand-700 hover:underline">
-                        B-{s.billNo}
+                        {s.billNo}
                       </Link>
-                      {s.isReturn && (
-                        <span className="badge ml-2 bg-rose-100 text-rose-700">Return</span>
-                      )}
                     </td>
                     <td className="td">{fmtDate(s.billDate)}</td>
                     <td className="td font-semibold">{s.partyName || '—'}</td>
                     <td className="td capitalize text-ink-500">{s.saleType} · {s.paymentType}</td>
-                    <td className="td font-mono text-xs text-ink-500">{s.jobCardRef || '—'}</td>
-                    <td className="td text-right font-bold tabular-nums">{fmt(s.netAmount)}</td>
+                    <td className="td font-mono text-xs text-ink-500">{s.refNo || s.jobCardRef || '—'}</td>
+                    <td className="td text-right font-bold tabular-nums">
+                      <span className={s.isReturn ? 'text-rose-600' : ''}>
+                        {s.isReturn ? `-${fmt(s.netAmount)}` : fmt(s.netAmount)}
+                      </span>
+                    </td>
                     <td className="td text-right tabular-nums text-emerald-600">{fmt(s.advanceAmount)}</td>
                     <td className="td text-right font-bold tabular-nums text-brass-600">{fmt(s.balance)}</td>
+                    <td className="td text-center">
+                      {s.isReturn ? (
+                        <StatusBadge status="return" />
+                      ) : s.orderStatus ? (
+                        <StatusBadge status={s.orderStatus} />
+                      ) : (
+                        <StatusBadge status="delivered" />
+                      )}
+                    </td>
                     <td className="td">
                       <Link href={`/sales/${s._id}`} className="text-xs font-bold text-brand-600 hover:underline">
                         View →

@@ -57,7 +57,7 @@ export function AttachSizePicker({
             : 'text-rose-600 hover:text-rose-800'
         }`}
       >
-        {attached ? `${attached} size attached` : 'Order Size Not Attached'}
+        {attached ? `${attached} size` : 'Size Not Attached'}
       </button>
       {attached && !disabled && (
         <button

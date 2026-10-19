@@ -12,6 +12,12 @@ export interface IJobCardItem {
    * alteration charge, a loose sale, or simply not attached yet.
    */
   personUid?: string;
+  /** Whether this single order item has been completed / stitched */
+  completed?: boolean;
+  /** Whether this single order item has already been invoiced / sold */
+  invoiced?: boolean;
+  /** Invoice bill number where this item was billed, e.g. B-12345 */
+  invoiceNo?: string;
 }
 
 export interface IJobCardMaterial {
@@ -44,7 +50,7 @@ export interface IJobCardPayment {
   swift?: string;
 }
 
-export type JobCardStatus = 'draft' | 'open' | 'closed' | 'converted' | 'deleted';
+export type JobCardStatus = 'draft' | 'open' | 'partially_ready' | 'ready' | 'closed' | 'converted' | 'delivered' | 'deleted';
 
 export interface IJobCard extends Document {
   /** Assigned only when the order becomes real; a draft has none. */
@@ -114,6 +120,9 @@ const itemSchema = new Schema<IJobCardItem>(
     rate: { type: Number, default: 0 },
     amount: { type: Number, default: 0 },
     personUid: String,
+    completed: { type: Boolean, default: false },
+    invoiced: { type: Boolean, default: false },
+    invoiceNo: String,
   },
   { _id: false },
 );
@@ -214,7 +223,7 @@ const jobCardSchema = new Schema<IJobCard>(
     payments: { type: [paymentSchema], default: [] },
     status: {
       type: String,
-      enum: ['draft', 'open', 'closed', 'converted', 'deleted'],
+      enum: ['draft', 'open', 'partially_ready', 'ready', 'closed', 'converted', 'delivered', 'deleted'],
       default: 'open',
     },
     closedAt: Date,

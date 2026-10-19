@@ -34,7 +34,7 @@ const settingSchema = new Schema<ISetting>(
   {
     key: { type: String, required: true, unique: true, default: 'global' },
     taxRate: { type: Number, default: 5 },
-    bookNo: { type: Number, default: 270 },
+    bookNo: { type: Number, default: 1 },
     salesman: { type: String, default: 'GENERAL' },
     deliveryDays: { type: Number, default: 7 },
     company: {

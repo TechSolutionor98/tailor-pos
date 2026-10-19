@@ -89,7 +89,9 @@ export function SaleInvoice({
 }) {
   const { company, bank } = settings;
   const rows = (sale.items ?? []).filter(
-    (r) => (r.productName ?? '').trim() || (r.netAmount ?? 0) > 0,
+    (r) =>
+      r.status !== 'pending' &&
+      ((r.productName ?? '').trim() || (r.netAmount ?? 0) > 0),
   );
 
   const taxRate = settings.taxRate ?? 5;
@@ -187,9 +189,28 @@ export function SaleInvoice({
       </div>
 
       {/* what the sheet calls itself: TAX INVOICE as requested */}
-      <p className="mt-[2mm] text-center text-[11pt] font-bold text-[#e03131] tracking-wider print:[print-color-adjust:exact]">
-        {sale.isReturn ? 'TAX INVOICE - RETURN' : 'TAX INVOICE'}
-      </p>
+      <div className="mt-[2mm] flex items-center justify-between">
+        <p className="text-[11pt] font-bold text-[#e03131] tracking-wider print:[print-color-adjust:exact]">
+          {sale.isReturn ? 'TAX INVOICE - RETURN' : 'TAX INVOICE'}
+        </p>
+        <span
+          className={`rounded-md px-2 py-0.5 text-[8.5pt] font-black uppercase tracking-wider print:[print-color-adjust:exact] ${
+            sale.isReturn
+              ? 'bg-rose-100 text-rose-800 border border-rose-300'
+              : sale.orderStatus === 'partially_ready'
+                ? 'bg-amber-100 text-amber-800 border border-amber-300'
+                : 'bg-emerald-100 text-emerald-800 border border-emerald-300'
+          }`}
+        >
+          {sale.isReturn
+            ? 'RETURN'
+            : sale.orderStatus
+              ? sale.orderStatus.replace('_', ' ').toUpperCase()
+              : sale.balance <= 0
+                ? 'DELIVERED'
+                : 'CREDIT / DUE'}
+        </span>
+      </div>
       <div
         className="mt-[1mm] h-[1.5px] w-full print:[print-color-adjust:exact]"
         style={{ backgroundColor: RULE }}
@@ -215,11 +236,26 @@ export function SaleInvoice({
           </table>
           <table className="w-full border-collapse">
             <tbody>
-              <DetailRow en="Inv No" ar="رقم الفاتورة" value={`B-${sale.billNo}`} />
+              <DetailRow en="Inv No" ar="رقم الفاتورة" value={String(sale.billNo)} />
+              <DetailRow
+                en="Status"
+                ar="الحالة"
+                value={
+                  sale.isReturn
+                    ? 'Return'
+                    : sale.orderStatus === 'partially_ready'
+                      ? 'Partially Ready'
+                      : sale.orderStatus === 'delivered'
+                        ? 'Delivered'
+                        : sale.orderStatus
+                          ? sale.orderStatus.replace('_', ' ')
+                          : 'Delivered'
+                }
+              />
               {sale.bookingNo && (
                 <DetailRow en="Booking No" ar="رقم الحجز" value={String(sale.bookingNo)} />
               )}
-              {sale.refNo && (
+              {sale.refNo && sale.refNo !== String(sale.billNo) && sale.refNo !== `B-${sale.billNo}` && (
                 <DetailRow en="Ref No" ar="رقم المرجع" value={sale.refNo} />
               )}
               <DetailRow en="Date" ar="تاريخ الفاتورة" value={fmtDate(sale.billDate)} />
@@ -333,7 +369,21 @@ export function SaleInvoice({
                     style={cell}
                   >
                     <div className="flex flex-col gap-0.5">
-                      <span className="font-semibold text-neutral-900">{r.productName}</span>
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <span className="font-semibold text-neutral-900">{r.productName}</span>
+                        {r.status === 'pending' && (
+                          <span className="inline-block rounded bg-amber-100 px-1.5 py-0.5 text-[6pt] font-black uppercase text-amber-800 border border-amber-300 print:[print-color-adjust:exact]">
+                            Pending
+                          </span>
+                        )}
+                        {r.status === 'ready' &&
+                          (sale.orderStatus === 'partially_ready' ||
+                            (sale.items ?? []).some((it) => it.status === 'pending')) && (
+                            <span className="inline-block rounded bg-emerald-100 px-1.5 py-0.5 text-[6pt] font-black uppercase text-emerald-800 border border-emerald-300 print:[print-color-adjust:exact]">
+                              Ready
+                            </span>
+                          )}
+                      </div>
                       {(r.code || r.info) && (
                         <span className="text-[6.5pt] text-neutral-500">
                           {[r.code && `Code: ${r.code}`, r.info].filter(Boolean).join(' · ')}

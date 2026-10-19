@@ -112,6 +112,12 @@ export interface JobCardItem {
   amount: number;
   /** The person this line is stitched to, by their measurement set's uid. */
   personUid?: string;
+  /** Whether this single order item has been completed / stitched */
+  completed?: boolean;
+  /** Whether this single order item has already been invoiced / sold */
+  invoiced?: boolean;
+  /** Invoice bill number where this item was billed, e.g. B-12345 */
+  invoiceNo?: string;
 }
 
 export interface JobCardMaterial {
@@ -202,7 +208,7 @@ export interface MeasurementProfile {
   ledgerType?: string;
 }
 
-export type JobCardStatus = 'open' | 'closed' | 'converted' | 'deleted';
+export type JobCardStatus = 'open' | 'partially_ready' | 'ready' | 'closed' | 'converted' | 'delivered' | 'deleted';
 
 export interface JobCard {
   _id: string;
@@ -243,6 +249,7 @@ export interface JobCard {
   isDeleted?: boolean;
   deletedAt?: string;
   deletedBy?: string;
+  remainingAdvance?: number;
 }
 
 export interface SaleItem {
@@ -262,6 +269,8 @@ export interface SaleItem {
   netAmount: number;
   warranty?: number;
   info?: string;
+  status?: 'ready' | 'pending';
+  completed?: boolean;
 }
 
 export interface Sale {
@@ -274,6 +283,7 @@ export interface Sale {
   creditCardNo?: string;
   jobCardRef?: string;
   jobCardId?: string;
+  orderStatus?: JobCardStatus | string;
   bookingNo?: string;
   refNo?: string;
   salesman: string;

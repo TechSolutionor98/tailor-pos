@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { api } from '@/lib/api';
 import { fmt, fmtDate, num, todayISO, toISODate } from '@/lib/format';
-import type { JobCard, Ledger, LedgerDue, Product, SavedBank, SavedCard } from '@/lib/types';
+import type { JobCard, Ledger, LedgerDue, Product, SavedBank, SavedCard, Sale } from '@/lib/types';
 import { useSettings } from './SettingsContext';
 import { useToast } from './Toast';
 import { useAuth } from './AuthContext';
@@ -36,6 +36,8 @@ interface SaleRow {
   discInput: string;
   warranty: string;
   info: string;
+  completed?: boolean;
+  status?: 'ready' | 'pending';
 }
 
 interface MaterialRow {
@@ -56,6 +58,8 @@ const emptyRow = (): SaleRow => ({
   discInput: '0',
   warranty: '0',
   info: '',
+  completed: undefined,
+  status: 'ready',
 });
 
 const emptyMaterialRow = (): MaterialRow => ({
@@ -108,6 +112,7 @@ export function SaleForm() {
   const [deliveryDate, setDeliveryDate] = useState('');
 
   const [rows, setRows] = useState<SaleRow[]>([emptyRow()]);
+  const [pendingOrderItems, setPendingOrderItems] = useState<SaleRow[]>([]);
   const [materials, setMaterials] = useState<MaterialRow[]>([emptyMaterialRow()]);
 
   const [discountType, setDiscountType] = useState<'percent' | 'fixed'>('fixed');
@@ -133,6 +138,9 @@ export function SaleForm() {
   const [jcOpen, setJcOpen] = useState(false);
   const [jcQ, setJcQ] = useState('');
   const [jcRows, setJcRows] = useState<JobCard[]>([]);
+  const [saleRows, setSaleRows] = useState<Sale[]>([]);
+
+  const hasCompleted = useMemo(() => rows.some((r) => r.completed === true), [rows]);
 
   /* ------------------------------------------------------------- figures */
 
@@ -144,12 +152,30 @@ export function SaleForm() {
       const input = num(r.discInput);
       const discAmt =
         r.discType === 'percent' ? r2((gross * input) / 100) : r2(Math.min(input, gross));
-      return { subtotal: r2(gross - discAmt), discAmt, qty, rate, gross };
+      const subtotal = r2(gross - discAmt);
+      return { subtotal, discAmt, qty, rate, gross };
     });
     const charged = rows.filter((r) => r.code?.trim() || r.productName?.trim() || num(r.rate) > 0);
-    const itemCount = charged.length;
-    const qtyCount = r2(lines.reduce((s, l) => s + l.qty, 0));
-    const total = r2(lines.reduce((s, l) => s + l.subtotal, 0));
+    const readyCount = charged.length;
+    const readyTotal = r2(lines.reduce((s, l) => s + l.subtotal, 0));
+    const pendingCount = pendingOrderItems.length;
+    const pendingTotal = r2(
+      pendingOrderItems.reduce((s, p) => {
+        const q = num(p.qty) || 1;
+        const rt = num(p.rate);
+        const gross = q * rt;
+        const input = num(p.discInput);
+        const discAmt = p.discType === 'percent' ? (gross * input) / 100 : Math.min(input, gross);
+        return s + (gross - discAmt);
+      }, 0),
+    );
+
+    const total = r2(readyTotal + pendingTotal);
+    const itemCount = charged.length + pendingCount;
+    const qtyCount = r2(
+      lines.reduce((s, l) => s + l.qty, 0) +
+        pendingOrderItems.reduce((s, p) => s + (num(p.qty) || 1), 0),
+    );
 
     const dIn = num(discountInput);
     const orderDiscount =
@@ -176,6 +202,11 @@ export function SaleForm() {
       lines,
       itemCount,
       qtyCount,
+      readyCount,
+      pendingCount,
+      readyTotal,
+      pendingTotal,
+      allProductsTotal: total,
       total,
       orderDiscount,
       taxable,
@@ -190,7 +221,7 @@ export function SaleForm() {
       balance,
       changeReturn,
     };
-  }, [rows, discountType, discountInput, taxRate, advancePaid, split]);
+  }, [rows, pendingOrderItems, discountType, discountInput, taxRate, advancePaid, split]);
 
   const materialCalc = useMemo(() => {
     const lines = materials.map((m) => {
@@ -288,15 +319,91 @@ export function SaleForm() {
 
   async function searchJobCards() {
     try {
-      const r = await api.jobCards.list(jcQ, '', 1, 10);
-      setJcRows(r.items.filter((j) => j.status !== 'converted'));
+      if (isReturn) {
+        const [salesRes, jcRes] = await Promise.all([
+          api.sales.list(jcQ, 1, 20, false),
+          api.jobCards.list(jcQ, '', 1, 20),
+        ]);
+        setSaleRows(salesRes.items || []);
+        setJcRows(jcRes.items || []);
+      } else {
+        setSaleRows([]);
+        const r = await api.jobCards.list(jcQ, '', 1, 20);
+        setJcRows(r.items.filter((j) => j.status !== 'converted' && j.status !== 'delivered'));
+      }
     } catch (e) {
       toast(e instanceof Error ? e.message : 'Search failed', 'error');
     }
   }
 
+  const loadFromSale = useCallback(
+    (s: Sale) => {
+      setBookingNo(s.bookingNo || '');
+      setRefNo(s.refNo || (s.billNo ? `B-${s.billNo}` : ''));
+      setPartyName(s.partyName || '');
+      setPhone(s.phone || '');
+      setLedgerId(s.ledgerId || '');
+
+      if (s.items && s.items.length > 0) {
+        setRows(
+          s.items.map((i) => ({
+            ...emptyRow(),
+            code: i.code || '',
+            productName: i.productName || '',
+            unit: i.unit || 'PIECE',
+            qty: String(i.qty || 1),
+            rate: String(i.rate || 0),
+            discType: i.discType || 'fixed',
+            discInput: String(i.discInput ?? 0),
+            warranty: String(i.warranty ?? 0),
+            info: i.info || '',
+          })),
+        );
+      }
+
+      if (s.materialsUsed && s.materialsUsed.length > 0) {
+        setMaterials(
+          s.materialsUsed.map((m) => ({
+            code: m.code || '',
+            productName: m.productName || '',
+            qty: String(m.qty ?? 1),
+            rate: String(m.rate ?? 0),
+          })),
+        );
+      } else {
+        setMaterials([emptyMaterialRow()]);
+      }
+
+      if (s.discountInput || s.additionalDiscount) {
+        setDiscountType(s.discountType || 'fixed');
+        setDiscountInput(String(s.discountInput ?? s.additionalDiscount ?? 0));
+      }
+
+      setJcOpen(false);
+      toast(`Loaded original sales invoice B-${s.billNo} for return`, 'info');
+    },
+    [toast],
+  );
+
   const convertFrom = useCallback(
-    async (j: JobCard) => {
+    async (rawJ: JobCard) => {
+      let j = rawJ;
+      if (rawJ._id) {
+        try {
+          j = await api.jobCards.get(rawJ._id);
+        } catch {
+          j = rawJ;
+        }
+      }
+
+      // 1. Filter out items that were already invoiced
+      const uninvoiced = (j.items || []).filter((i) => !i.invoiced);
+      if (uninvoiced.length === 0) {
+        setJcOpen(false);
+        toast(`Order ${j.ref || j.no} has already been fully invoiced.`, 'warning');
+        return;
+      }
+
       const orderBookNo = j.bookNo != null ? String(j.bookNo) : (j.no != null ? String(j.no) : '');
       const orderRefNo = j.ref || (j.no != null ? `Ref-${j.no}` : '');
       setBookingNo(orderBookNo);
@@ -309,65 +416,98 @@ export function SaleForm() {
       setPhone(j.phone ?? '');
       setLedgerId(j.ledgerId ?? '');
 
+      const availAdv = j.remainingAdvance !== undefined ? num(j.remainingAdvance) : num(j.advance);
       const bd: Record<TenderMode, number> = { cash: 0, card: 0, bank: 0 };
-      if (j.payments && j.payments.length > 0) {
-        for (const p of j.payments) {
-          const m = (p.mode === 'credit' ? 'cash' : p.mode) as TenderMode;
-          if (m in bd) {
-            bd[m] = r2(bd[m] + num(p.amount));
+      if (availAdv > 0) {
+        if (j.payments && j.payments.length > 0) {
+          let left = availAdv;
+          for (const p of j.payments) {
+            if (left <= 0) break;
+            const m = (p.mode === 'credit' ? 'cash' : p.mode) as TenderMode;
+            if (m in bd) {
+              const take = Math.min(left, num(p.amount));
+              bd[m] = r2(bd[m] + take);
+              left = r2(left - take);
+            }
           }
-        }
-      } else if (num(j.advance) > 0) {
-        const m = ((j.paymentMode as TenderMode) || 'cash');
-        if (m in bd) {
-          bd[m] = r2(num(j.advance));
+          if (left > 0) {
+            bd.cash = r2(bd.cash + left);
+          }
+        } else {
+          const m = ((j.paymentMode as TenderMode) || 'cash');
+          if (m in bd) {
+            bd[m] = r2(availAdv);
+          }
         }
       }
       setAdvanceBreakdown(bd);
 
-      const allRows: SaleRow[] = [];
-      if (j.items && j.items.length > 0) {
-        allRows.push(
-          ...j.items.map((i) => ({
+      const allItems = j.items || [];
+      const hasAnyCompleted = allItems.some((i) => Boolean(i.completed));
+
+      // Only items that are ready to be delivered right now are shown in the table
+      const readyToDisplay = allItems.filter(
+        (i) => !i.invoiced && (hasAnyCompleted ? Boolean(i.completed) : true),
+      );
+
+      const readyRows: SaleRow[] = [];
+      if (readyToDisplay.length > 0) {
+        readyRows.push(
+          ...readyToDisplay.map((i) => ({
             ...emptyRow(),
             code: i.code ?? '',
             productName: i.productName ?? '',
             qty: String(i.qty),
             rate: String(i.rate),
             info: '',
+            completed: true,
+            status: 'ready' as const,
           })),
         );
       }
-      if (num(j.additionalCharges) > 0) {
-        allRows.push({
+      const isFirstBill = !j.invoiceNo;
+      if (isFirstBill && num(j.additionalCharges) > 0) {
+        readyRows.push({
           ...emptyRow(),
           code: 'EXTRA',
           productName: 'Additional Charges',
           qty: '1',
           rate: String(j.additionalCharges),
+          completed: true,
+          status: 'ready',
         });
       }
-      if (allRows.length > 0) {
-        setRows(allRows);
+      if (readyRows.length > 0) {
+        setRows(readyRows);
+      } else {
+        setRows([emptyRow()]);
       }
 
-      // Load materials used from the job card (both per-person sets and legacy list)
+      // All other items belonging to this order (prior invoiced or pending stitching)
+      // Hidden from the table, but preserved so that the order's full total amount is displayed
+      const otherOrderItems = allItems.filter((i) => !readyToDisplay.includes(i));
+      const pendingRows: SaleRow[] = otherOrderItems.map((i) => ({
+        ...emptyRow(),
+        code: i.code ?? '',
+        productName: i.productName ?? '',
+        qty: String(i.qty),
+        rate: String(i.rate),
+        info: '',
+        completed: false,
+        status: 'pending' as const,
+      }));
+      setPendingOrderItems(pendingRows);
+
+      toast(
+        `Loaded order ${orderRefNo}: ${readyRows.length} ready item(s) (Order Total: ${fmt(j.netAmount || 0)} AED)`,
+        'info',
+      );
+
+      // Load materials used from the job card only on the first bill
       const loadedMaterials: MaterialRow[] = [];
-      if (j.materialsUsed && j.materialsUsed.length > 0) {
-        for (const m of j.materialsUsed) {
-          if (m.code || m.productName || num(m.qty) || num(m.rate)) {
-            loadedMaterials.push({
-              code: m.code ?? '',
-              productName: m.productName ?? '',
-              qty: String(m.qty ?? 1),
-              rate: String(m.rate ?? 0),
-            });
-          }
-        }
-      }
-      if (j.measurementSets && j.measurementSets.length > 0) {
-        for (const set of j.measurementSets) {
-          for (const m of set.materials ?? []) {
+      if (isFirstBill) {
+        if (j.materialsUsed && j.materialsUsed.length > 0) {
+          for (const m of j.materialsUsed) {
             if (m.code || m.productName || num(m.qty) || num(m.rate)) {
               loadedMaterials.push({
                 code: m.code ?? '',
@@ -375,6 +515,20 @@ export function SaleForm() {
                 qty: String(m.qty ?? 1),
                 rate: String(m.rate ?? 0),
               });
+            }
+          }
+        }
+        if (j.measurementSets && j.measurementSets.length > 0) {
+          for (const set of j.measurementSets) {
+            for (const m of set.materials ?? []) {
+              if (m.code || m.productName || num(m.qty) || num(m.rate)) {
+                loadedMaterials.push({
+                  code: m.code ?? '',
+                  productName: m.productName ?? '',
+                  qty: String(m.qty ?? 1),
+                  rate: String(m.rate ?? 0),
+                });
+              }
             }
           }
         }
@@ -400,7 +554,6 @@ export function SaleForm() {
         }
       }
       setJcOpen(false);
-      toast(`Loaded stitching order ${j.ref} — advance ${fmt(j.advance)} AED applied`, 'info');
     },
     [toast],
   );
@@ -428,9 +581,9 @@ export function SaleForm() {
   }
 
   async function save(andPrint: boolean) {
-    const filled = rows.filter((r) => r.code || r.productName || num(r.rate));
-    if (filled.length === 0) {
-      toast('Add at least one item', 'error');
+    const validItems = rows.filter((r) => r.code || r.productName || num(r.rate));
+    if (validItems.length === 0) {
+      toast('No items to invoice. Please add at least one item.', 'error');
       return;
     }
     if (!partyName.trim()) {
@@ -476,17 +629,34 @@ export function SaleForm() {
         partyName: partyName.trim(),
         phone: phone.trim(),
         ledgerId: ledgerId || undefined,
-        items: filled.map((r) => ({
-          code: r.code,
-          productName: r.productName,
-          unit: r.unit,
-          qty: num(r.qty),
-          rate: num(r.rate),
-          discType: r.discType,
-          discInput: num(r.discInput),
-          warranty: num(r.warranty),
-          info: r.info,
-        })),
+        items: [
+          ...validItems.map((r) => ({
+            code: r.code,
+            productName: r.productName,
+            unit: r.unit,
+            qty: num(r.qty),
+            rate: num(r.rate),
+            discType: r.discType,
+            discInput: num(r.discInput),
+            warranty: num(r.warranty),
+            info: r.info,
+            completed: true,
+            status: 'ready' as const,
+          })),
+          ...pendingOrderItems.map((p) => ({
+            code: p.code,
+            productName: p.productName,
+            unit: p.unit,
+            qty: num(p.qty),
+            rate: num(p.rate),
+            discType: p.discType,
+            discInput: num(p.discInput),
+            warranty: num(p.warranty),
+            info: p.info,
+            completed: false,
+            status: 'pending' as const,
+          })),
+        ],
         materialsUsed: materials
           .filter((m) => m.code || m.productName || num(m.rate))
           .map((m) => ({
@@ -547,7 +717,7 @@ export function SaleForm() {
       }
 
       toast(`${isReturn ? 'Return' : 'Bill'} ${sale.billNo} saved`);
-      router.push(andPrint ? `/sales/${sale._id}?print=1` : `/sales/${sale._id}`);
+      router.push(andPrint ? `/sales/${sale._id}?print=1` : '/sales');
     } catch (e) {
       toast(e instanceof Error ? e.message : 'Save failed', 'error');
     } finally {
@@ -571,6 +741,15 @@ export function SaleForm() {
               <p className="text-3xl font-black leading-none tabular-nums text-ink-900">
                 {billNo ?? '…'}
               </p>
+              <span
+                className={`ml-2 inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold ${
+                  isReturn
+                    ? 'bg-rose-100 text-rose-700 border border-rose-200'
+                    : 'bg-emerald-100 text-emerald-700 border border-emerald-200'
+                }`}
+              >
+                {isReturn ? '↩ Return' : '✓ Delivered'}
+              </span>
             </div>
 
             <div className="grid grid-cols-2 gap-4 sm:grid-cols-12">
@@ -659,12 +838,12 @@ export function SaleForm() {
 
               <div className="col-span-2 sm:col-span-3">
                 <div className="mb-1 flex h-7 items-center justify-between">
-                  <label className="label mb-0">Ref No</label>
+                  <label className="label mb-0">{isReturn ? 'Original Inv / Ref' : 'Ref No'}</label>
                 </div>
                 <TextInput
-                  value={refNo || (billNo ? `B-${billNo}` : '')}
+                  value={refNo || (billNo ? String(billNo) : '')}
                   onChange={(e) => setRefNo(e.target.value)}
-                  placeholder="Ref No"
+                  placeholder={isReturn ? 'e.g. 101 or Ref-13051' : 'Ref No'}
                   className="bg-ink-100 font-mono text-ink-600"
                 />
               </div>
@@ -710,7 +889,9 @@ export function SaleForm() {
           {/* items section: with the exact fields requested in the screenshot */}
           <section className="border-t border-ink-200 px-3 sm:px-4 py-4">
             <div className="mb-3 flex items-center justify-between">
-              <h2 className="text-base font-extrabold tracking-tight text-ink-900">Sale Items</h2>
+              <div className="flex items-center gap-2">
+                <h2 className="text-base font-extrabold tracking-tight text-ink-900">Sale Items</h2>
+              </div>
               <button
                 type="button"
                 className="btn-soft !py-1.5 text-xs"
@@ -722,24 +903,26 @@ export function SaleForm() {
             <div className="overflow-x-auto rounded-xl border border-ink-200 no-scrollbar">
               <table className="w-full table-fixed">
                 <colgroup>
-                  <col style={{ width: 142 }} />
+                  <col style={{ width: 140 }} />
+                  <col style={{ width: 75 }} />
                   <col style={{ width: 60 }} />
-                  <col style={{ width: 108 }} />
-                  <col style={{ width: 90 }} />
+                  <col style={{ width: 100 }} />
+                  <col style={{ width: 85 }} />
                   <col style={{ width: 38 }} />
-                  <col style={{ width: 104 }} />
-                  <col style={{ width: 60 }} />
+                  <col style={{ width: 95 }} />
+                  <col style={{ width: 65 }} />
                   <col style={{ width: 28 }} />
                 </colgroup>
                 <thead className="bg-ink-50">
                   <tr className="text-center text-xs font-bold text-ink-700">
-                    <th className="th-s py-2 pl-3 text-left" style={{ width: 142 }}>Product</th>
+                    <th className="th-s py-2 pl-3 text-left" style={{ width: 140 }}>Product</th>
+                    <th className="th-s py-2 text-center" style={{ width: 75 }}>Status</th>
                     <th className="th-s py-2 text-center" style={{ width: 60 }}>Quantity</th>
-                    <th className="th-s py-2 text-center" style={{ width: 108 }}>Unit Price</th>
-                    <th className="th-s py-2 text-center" style={{ width: 90 }}>Discount</th>
+                    <th className="th-s py-2 text-center" style={{ width: 100 }}>Unit Price</th>
+                    <th className="th-s py-2 text-center" style={{ width: 85 }}>Discount</th>
                     <th className="th-s py-2 text-center" style={{ width: 38 }}>Warranty</th>
-                    <th className="th-s py-2 text-center" style={{ width: 104 }}>Info</th>
-                    <th className="th-s py-2 text-center" style={{ width: 60 }}>Subtotal</th>
+                    <th className="th-s py-2 text-center" style={{ width: 95 }}>Info</th>
+                    <th className="th-s py-2 text-center" style={{ width: 65 }}>Subtotal</th>
                     <th className="th-s py-2 text-center" style={{ width: 28 }}>
                       <button
                         type="button"
@@ -755,9 +938,12 @@ export function SaleForm() {
                 </thead>
                 <tbody className="divide-y divide-ink-200">
                   {rows.map((r, i) => (
-                    <tr key={i} className="hover:bg-emerald-50/40 transition-colors">
+                    <tr
+                      key={i}
+                      className="hover:bg-emerald-50/40 transition-colors"
+                    >
                       {/* Product */}
-                      <td className="px-2 py-2" style={{ width: 142 }}>
+                      <td className="px-2 py-2" style={{ width: 140 }}>
                         <div className="flex w-full items-center gap-1.5">
                           {r.code && (
                             <span className="shrink-0 rounded bg-ink-100 px-1.5 py-0.5 font-mono text-[10px] font-bold text-brand-700">
@@ -775,6 +961,21 @@ export function SaleForm() {
                             />
                           </div>
                         </div>
+                      </td>
+
+                      {/* Status (Read-only) */}
+                      <td className="px-1 py-2 text-center" style={{ width: 75 }}>
+                        <span
+                          className={`inline-flex items-center justify-center gap-1 w-full rounded-md px-1.5 py-1 text-[11px] font-bold shadow-sm select-none ${
+                            r.status === 'pending'
+                              ? 'bg-amber-100 text-amber-800 border border-amber-300'
+                              : 'bg-emerald-100 text-emerald-800 border border-emerald-300'
+                          }`}
+                          title={`Status: ${r.status === 'pending' ? 'Pending' : 'Ready'}`}
+                        >
+                          <span>{r.status === 'pending' ? '⏳' : '✓'}</span>
+                          <span className="capitalize">{r.status === 'pending' ? 'Pending' : 'Ready'}</span>
+                        </span>
                       </td>
 
                       {/* Quantity */}
@@ -805,7 +1006,7 @@ export function SaleForm() {
                       </td>
 
                       {/* Unit Price */}
-                      <td className="px-0.5 py-2" style={{ width: 108 }}>
+                      <td className="px-0.5 py-2" style={{ width: 100 }}>
                         <div className="flex h-8 items-center rounded-lg border border-ink-300 bg-white overflow-hidden focus-within:border-brand-500">
                           <input
                             type="text"
@@ -830,7 +1031,7 @@ export function SaleForm() {
                       </td>
 
                       {/* Discount */}
-                      <td className="px-0.5 py-2" style={{ width: 90 }}>
+                      <td className="px-0.5 py-2" style={{ width: 85 }}>
                         <div className="flex h-8 items-center rounded-lg border border-ink-300 bg-white overflow-hidden focus-within:border-brand-500">
                           <input
                             type="text"
@@ -866,7 +1067,7 @@ export function SaleForm() {
                       </td>
 
                       {/* Info */}
-                      <td className="px-0.5 py-2" style={{ width: 104 }}>
+                      <td className="px-0.5 py-2" style={{ width: 95 }}>
                         <div className="flex h-8 items-center gap-1">
                           <select
                             value={r.info ? 'set' : ''}
@@ -894,8 +1095,8 @@ export function SaleForm() {
 
                       {/* Subtotal */}
                       <td
-                        className="px-0.5 py-2 text-center text-xs font-bold tabular-nums text-ink-900 leading-8 whitespace-nowrap"
-                        style={{ width: 60 }}
+                        className="px-0.5 py-2 text-center text-xs font-bold tabular-nums leading-8 whitespace-nowrap text-ink-900"
+                        style={{ width: 65 }}
                       >
                         {fmt(calc.lines[i]?.subtotal ?? 0)}
                       </td>
@@ -922,13 +1123,25 @@ export function SaleForm() {
               </table>
             </div>
 
-            <div className="mt-2.5 flex items-center justify-end gap-8 rounded-lg bg-ink-50 px-3.5 py-2 text-[12px] font-bold text-ink-800">
-              <span>
-                Items: <span className="tabular-nums">{fmt(calc.qtyCount)}</span>
-              </span>
-              <span>
-                Total: <span className="tabular-nums">{fmt(calc.total)} AED</span>
-              </span>
+            <div className="mt-2.5 flex flex-wrap items-center justify-between gap-3 rounded-lg bg-ink-50 px-3.5 py-2 text-[12px] font-bold text-ink-800">
+              <div className="flex items-center gap-3">
+                <span className="text-ink-600">
+                  Ready Items: <span className="tabular-nums font-extrabold text-emerald-700">{calc.readyCount}</span>
+                </span>
+                {calc.pendingCount > 0 && (
+                  <span className="text-ink-600">
+                    Pending Items: <span className="tabular-nums font-extrabold text-amber-700">{calc.pendingCount}</span>
+                  </span>
+                )}
+              </div>
+              <div className="flex items-center gap-4">
+                <span>
+                  Bill Items: <span className="tabular-nums">{fmt(calc.qtyCount)}</span>
+                </span>
+                <span>
+                  Bill Total: <span className="tabular-nums font-extrabold text-brand-700">{fmt(calc.total)} AED</span>
+                </span>
+              </div>
             </div>
           </section>
 
@@ -1095,6 +1308,7 @@ export function SaleForm() {
         {/* Right Column: Payment Scenario matching JobCardForm */}
         <div className="w-full xl:w-[325px] 2xl:w-[340px] shrink-0">
           <Card className="sticky top-16 max-h-[calc(100vh-4rem)] overflow-y-auto rounded-none border-x-0 border-t-0 p-4">
+
             <div className="space-y-1.5 text-xs">
               <div className="flex items-center justify-between">
                 <span className="font-medium text-ink-500">Total without Tax</span>
@@ -1141,7 +1355,7 @@ export function SaleForm() {
                   Total Payable
                 </p>
                 <p className="mt-0.5 text-[10px] font-medium text-white/60">
-                  Items: {calc.itemCount} · Quantity: {fmt(calc.qtyCount)}
+                  Items: {calc.itemCount} ({calc.readyCount} Ready{calc.pendingCount > 0 ? `, ${calc.pendingCount} Pending` : ''}) · Quantity: {fmt(calc.qtyCount)}
                 </p>
               </div>
               <p className="shrink-0 text-xl font-black tabular-nums leading-none">
@@ -1274,12 +1488,16 @@ export function SaleForm() {
         seedName={partyName}
       />
 
-      {/* Find Order Modal */}
+      {/* Find Order / Invoice Modal */}
       <Modal
         open={jcOpen}
         onClose={() => setJcOpen(false)}
-        title="Find a stitching order"
-        sub="Open or closed orders that have not been billed yet"
+        title={isReturn ? 'Find Sales Invoice or Stitching Order' : 'Find a stitching order'}
+        sub={
+          isReturn
+            ? 'Select a previous invoice or order to create a return'
+            : 'Open or ready orders that have not been billed yet'
+        }
         wide
         footer={
           <button className="btn-soft" onClick={() => setJcOpen(false)}>
@@ -1290,7 +1508,11 @@ export function SaleForm() {
         <div className="mb-4 flex gap-2">
           <TextInput
             autoFocus
-            placeholder="e.g. Ref-13051 or customer name"
+            placeholder={
+              isReturn
+                ? 'e.g. Bill No (e.g. 101), Order Ref, or customer name'
+                : 'e.g. Ref-13051 or customer name'
+            }
             value={jcQ}
             onChange={(e) => setJcQ(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && void searchJobCards()}
@@ -1299,37 +1521,131 @@ export function SaleForm() {
             Search
           </button>
         </div>
+
+        {/* Sales Invoices Table (when isReturn and sales exist) */}
+        {isReturn && saleRows.length > 0 && (
+          <div className="mb-6">
+            <h3 className="mb-2 text-xs font-bold uppercase tracking-wider text-ink-500">
+              Sales Invoices
+            </h3>
+            <div className="overflow-x-auto rounded-xl border border-ink-200">
+              <table className="w-full">
+                <thead>
+                  <tr className="border-b border-ink-100 bg-ink-50/60 text-xs">
+                    <th className="th">Inv No</th>
+                    <th className="th">Date</th>
+                    <th className="th">Customer</th>
+                    <th className="th text-right">Net Amount</th>
+                    <th className="th text-right">Advance</th>
+                    <th className="th text-right">Balance</th>
+                    <th className="th text-center">Status</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-ink-50 text-xs">
+                  {saleRows.map((s) => (
+                    <tr
+                      key={s._id}
+                      className="cursor-pointer hover:bg-brand-50 transition-colors"
+                      onClick={() => loadFromSale(s)}
+                    >
+                      <td className="td font-mono font-bold text-brand-700">
+                        {s.billNo}
+                      </td>
+                      <td className="td">{fmtDate(s.billDate)}</td>
+                      <td className="td font-semibold">{s.partyName || '—'}</td>
+                      <td className="td text-right font-bold tabular-nums">
+                        {fmt(s.netAmount)}
+                      </td>
+                      <td className="td text-right tabular-nums text-emerald-600">
+                        {fmt(s.advanceAmount)}
+                      </td>
+                      <td className="td text-right font-bold tabular-nums text-brass-600">
+                        {fmt(s.balance)}
+                      </td>
+                      <td className="td text-center">
+                        {s.isReturn ? (
+                          <span className="inline-flex items-center gap-1 rounded-full bg-rose-100 px-2 py-0.5 text-[10px] font-bold text-rose-700 border border-rose-200">
+                            ↩ Return
+                          </span>
+                        ) : s.orderStatus ? (
+                          <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-bold ${
+                            s.orderStatus === 'delivered'
+                              ? 'bg-emerald-100 text-emerald-800 border border-emerald-200'
+                              : s.orderStatus === 'partially_ready'
+                              ? 'bg-amber-100 text-amber-800 border border-amber-200'
+                              : 'bg-ink-100 text-ink-700'
+                          }`}>
+                            {s.orderStatus === 'partially_ready' ? 'Partially Ready' : s.orderStatus.replace('_', ' ')}
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-bold text-emerald-700 border border-emerald-200">
+                            ✓ Delivered
+                          </span>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+
+        {/* Stitching Orders Table */}
         {jcRows.length > 0 && (
-          <table className="w-full">
-            <thead>
-              <tr className="border-b border-ink-100">
-                <th className="th">Book No</th>
-                <th className="th">Ref</th>
-                <th className="th">Customer</th>
-                <th className="th text-right">Net</th>
-                <th className="th text-right">Advance</th>
-                <th className="th">Status</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-ink-50">
-              {jcRows.map((j) => (
-                <tr
-                  key={j._id}
-                  className="cursor-pointer hover:bg-brand-50"
-                  onClick={() => convertFrom(j)}
-                >
-                  <td className="td font-mono text-xs font-bold text-brand-700">
-                    {j.bookNo ?? j.no}
-                  </td>
-                  <td className="td font-mono text-xs text-ink-600">{j.ref}</td>
-                  <td className="td">{j.partyName || '—'}</td>
-                  <td className="td text-right tabular-nums">{fmt(j.netAmount)}</td>
-                  <td className="td text-right tabular-nums text-emerald-600">{fmt(j.advance)}</td>
-                  <td className="td capitalize">{j.status}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          <div>
+            {isReturn && (
+              <h3 className="mb-2 text-xs font-bold uppercase tracking-wider text-ink-500">
+                Stitching Orders
+              </h3>
+            )}
+            <div className="overflow-x-auto rounded-xl border border-ink-200">
+              <table className="w-full">
+                <thead>
+                  <tr className="border-b border-ink-100 bg-ink-50/60 text-xs">
+                    <th className="th">Inv No</th>
+                    <th className="th">Book No</th>
+                    <th className="th">Ref</th>
+                    <th className="th">Customer</th>
+                    <th className="th text-right">Net</th>
+                    <th className="th text-right">Advance</th>
+                    <th className="th text-center">Status</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-ink-50 text-xs">
+                  {jcRows.map((j) => (
+                    <tr
+                      key={j._id}
+                      className="cursor-pointer hover:bg-brand-50 transition-colors"
+                      onClick={() => convertFrom(j)}
+                    >
+                      <td className="td font-mono font-bold text-brand-700">
+                        {j.invoiceNo ? j.invoiceNo.replace(/^B-?/i, '') : '—'}
+                      </td>
+                      <td className="td font-mono font-bold text-ink-700">
+                        {j.bookNo ?? j.no}
+                      </td>
+                      <td className="td font-mono text-ink-600">{j.ref}</td>
+                      <td className="td font-semibold">{j.partyName || '—'}</td>
+                      <td className="td text-right tabular-nums">{fmt(j.netAmount)}</td>
+                      <td className="td text-right tabular-nums text-emerald-600">{fmt(j.advance)}</td>
+                      <td className="td text-center">
+                        <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide ${
+                          j.status === 'delivered'
+                            ? 'bg-emerald-100 text-emerald-900 border border-emerald-300'
+                            : j.status === 'partially_ready'
+                            ? 'bg-amber-100 text-amber-900 border border-amber-300'
+                            : 'bg-brand-100 text-brand-800'
+                        }`}>
+                          {j.status === 'partially_ready' ? 'Partially Ready' : j.status?.replace('_', ' ')}
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
         )}
       </Modal>
     </div>

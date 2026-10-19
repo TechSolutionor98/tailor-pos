@@ -125,8 +125,8 @@ dashboardRouter.get(
       },
       orders: {
         newOrders: orderAgg.reduce((sum, r) => sum + r.count, 0),
-        pending: orderCount('open'),
-        delivered: orderCount('closed') + orderCount('converted'),
+        pending: orderCount('open') + orderCount('partially_ready') + orderCount('ready'),
+        delivered: orderCount('closed') + orderCount('converted') + orderCount('delivered'),
       },
       payments: {
         ...payments,

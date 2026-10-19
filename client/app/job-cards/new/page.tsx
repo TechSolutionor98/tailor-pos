@@ -24,7 +24,20 @@ function NewJobCardContent() {
       try {
         const doc = await api.jobCards.get(copyFromId);
         if (!live) return;
-        setCopiedDoc(doc);
+        const cleanDoc: JobCard = {
+          ...doc,
+          status: 'open',
+          invoiceNo: undefined,
+          payments: [],
+          advance: 0,
+          items: (doc.items || []).map((i) => ({
+            ...i,
+            completed: false,
+            invoiced: false,
+            invoiceNo: undefined,
+          })),
+        };
+        setCopiedDoc(cleanDoc);
         toast(`Loaded details from Order #${doc.no || doc.ref}`, 'info');
       } catch (e) {
         if (!live) return;
