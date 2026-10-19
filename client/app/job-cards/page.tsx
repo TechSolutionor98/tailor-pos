@@ -104,7 +104,7 @@ function OrderActionMenu({
     <div ref={anchorRef} className="relative inline-block text-left" onClick={(e) => e.stopPropagation()}>
       <button
         type="button"
-        className="btn-soft inline-flex items-center gap-1.5 !px-2.5 !py-1 text-xs font-semibold"
+        className="btn-soft inline-flex items-center gap-1 !px-2 !py-0.5 text-[11px] font-semibold"
         onClick={() => setOpen((prev) => !prev)}
         aria-expanded={open}
         disabled={deleting || updating}
@@ -392,38 +392,38 @@ function JobCardsInner() {
           </div>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[1150px] border-collapse">
+            <table className="w-full border-collapse">
               <thead>
                 <tr className="border-b border-ink-100 bg-ink-50/60">
                   {canConvert && (
-                    <th className="th sticky left-0 z-20 w-12 min-w-[48px] max-w-[48px] bg-ink-50 text-center">
+                    <th className="th !px-1.5 !py-2 text-[10px] sticky left-0 z-20 w-9 min-w-[36px] max-w-[36px] bg-ink-50 text-center">
                       <input
                         type="checkbox"
                         checked={allPicked}
                         disabled={convertible.length === 0}
                         onChange={(e) => setSelected(e.target.checked ? convertible.map((j) => j._id) : [])}
-                        className="h-4 w-4 rounded border-ink-300 text-brand-600 focus:ring-brand-500"
+                        className="h-3.5 w-3.5 rounded border-ink-300 text-brand-600 focus:ring-brand-500"
                         aria-label="Select all open orders"
                       />
                     </th>
                   )}
                   <th
-                    className={`th sticky z-20 w-32 min-w-[120px] bg-ink-50 border-r border-ink-200/80 shadow-[3px_0_6px_-2px_rgba(0,0,0,0.06)] ${
-                      canConvert ? 'left-12' : 'left-0'
+                    className={`th !px-2 !py-2 text-[10px] sticky z-20 w-24 min-w-[80px] bg-ink-50 border-r border-ink-200/80 shadow-[2px_0_4px_-1px_rgba(0,0,0,0.05)] ${
+                      canConvert ? 'left-9' : 'left-0'
                     }`}
                   >
-                    Invoice No
+                    Order No
                   </th>
-                  <th className="th min-w-[100px]">Ref</th>
-                  <th className="th min-w-[160px]">Customer</th>
-                  <th className="th min-w-[120px]">Phone</th>
-                  <th className="th min-w-[100px]">Date</th>
-                  <th className="th min-w-[100px]">Delivery</th>
-                  <th className="th text-right min-w-[100px]">Total</th>
-                  <th className="th text-right min-w-[100px]">Advance</th>
-                  <th className="th text-right min-w-[100px]">Balance</th>
-                  <th className="th min-w-[110px]">Status</th>
-                  <th className="th sticky right-0 z-20 w-28 min-w-[110px] bg-ink-50 text-right border-l border-ink-200/80 shadow-[-3px_0_6px_-2px_rgba(0,0,0,0.06)]">
+                  <th className="th !px-2 !py-2 text-[10px] min-w-[70px]">Ref</th>
+                  <th className="th !px-2 !py-2 text-[10px] min-w-[120px]">Customer</th>
+                  <th className="th !px-2 !py-2 text-[10px] min-w-[95px]">Phone</th>
+                  <th className="th !px-2 !py-2 text-[10px] min-w-[80px]">Date</th>
+                  <th className="th !px-2 !py-2 text-[10px] min-w-[80px]">Delivery</th>
+                  <th className="th !px-2 !py-2 text-[10px] text-right min-w-[70px]">Total</th>
+                  <th className="th !px-2 !py-2 text-[10px] text-right min-w-[70px]">Advance</th>
+                  <th className="th !px-2 !py-2 text-[10px] text-right min-w-[70px]">Balance</th>
+                  <th className="th !px-2 !py-2 text-[10px] min-w-[90px]">Status</th>
+                  <th className="th !px-2 !py-2 text-[10px] sticky right-0 z-20 w-20 min-w-[75px] bg-ink-50 text-right border-l border-ink-200/80 shadow-[-2px_0_4px_-1px_rgba(0,0,0,0.05)]">
                     Actions
                   </th>
                 </tr>
@@ -449,45 +449,45 @@ function JobCardsInner() {
                     >
                       {canConvert && (
                         <td
-                          className={`td sticky left-0 z-10 w-12 min-w-[48px] max-w-[48px] text-center transition-colors ${cellBg}`}
+                          className={`td !px-1.5 !py-1.5 text-xs sticky left-0 z-10 w-9 min-w-[36px] max-w-[36px] text-center transition-colors ${cellBg}`}
                         >
                           <input
                             type="checkbox"
                             checked={selected.includes(j._id)}
                             disabled={j.status !== 'open' && j.status !== 'partially_ready'}
                             onChange={() => toggle(j._id)}
-                            className="h-4 w-4 rounded border-ink-300 text-brand-600 focus:ring-brand-500 disabled:opacity-40"
+                            className="h-3.5 w-3.5 rounded border-ink-300 text-brand-600 focus:ring-brand-500 disabled:opacity-40"
                             aria-label={`Select order ${orderNo(j)}`}
                           />
                         </td>
                       )}
                       <td
-                        className={`td sticky z-10 w-32 min-w-[120px] border-r border-ink-200/80 shadow-[3px_0_6px_-2px_rgba(0,0,0,0.06)] transition-colors ${
-                          canConvert ? 'left-12' : 'left-0'
+                        className={`td !px-2 !py-1.5 text-xs sticky z-10 w-24 min-w-[80px] border-r border-ink-200/80 shadow-[2px_0_4px_-1px_rgba(0,0,0,0.05)] transition-colors ${
+                          canConvert ? 'left-9' : 'left-0'
                         } ${cellBg}`}
                       >
                         <Link
                           href={`/job-cards/${j._id}`}
-                          className={`font-extrabold hover:underline ${
+                          className={`font-bold hover:underline ${
                             isDel ? 'text-rose-700 line-through' : 'text-brand-700'
                           }`}
                         >
                           {orderNo(j)}
                         </Link>
                       </td>
-                      <td className={`td font-mono text-xs text-ink-500 transition-colors ${cellBg}`}>{j.ref}</td>
-                      <td className={`td font-semibold transition-colors ${cellBg}`}>{j.partyName || '—'}</td>
-                      <td className={`td font-mono text-xs transition-colors ${cellBg}`}>{j.phone || '—'}</td>
-                      <td className={`td transition-colors ${cellBg}`}>{fmtDate(j.date)}</td>
-                      <td className={`td transition-colors ${cellBg}`}>{fmtDate(j.deliveryDate)}</td>
-                      <td className={`td text-right font-bold tabular-nums transition-colors ${cellBg}`}>{fmt(j.netAmount)}</td>
-                      <td className={`td text-right tabular-nums text-emerald-600 transition-colors ${cellBg}`}>{fmt(j.advance)}</td>
-                      <td className={`td text-right font-bold tabular-nums text-brass-600 transition-colors ${cellBg}`}>{fmt(j.balance)}</td>
-                      <td className={`td transition-colors ${cellBg}`}>
+                      <td className={`td !px-2 !py-1.5 font-mono text-xs text-ink-500 transition-colors ${cellBg}`}>{j.ref}</td>
+                      <td className={`td !px-2 !py-1.5 font-semibold text-xs transition-colors max-w-[150px] truncate ${cellBg}`} title={j.partyName || ''}>{j.partyName || '—'}</td>
+                      <td className={`td !px-2 !py-1.5 font-mono text-xs transition-colors ${cellBg}`}>{j.phone || '—'}</td>
+                      <td className={`td !px-2 !py-1.5 text-xs transition-colors ${cellBg}`}>{fmtDate(j.date)}</td>
+                      <td className={`td !px-2 !py-1.5 text-xs transition-colors ${cellBg}`}>{fmtDate(j.deliveryDate)}</td>
+                      <td className={`td !px-2 !py-1.5 text-right font-bold text-xs tabular-nums transition-colors ${cellBg}`}>{fmt(j.netAmount)}</td>
+                      <td className={`td !px-2 !py-1.5 text-right text-xs tabular-nums text-emerald-600 transition-colors ${cellBg}`}>{fmt(j.advance)}</td>
+                      <td className={`td !px-2 !py-1.5 text-right font-bold text-xs tabular-nums text-brass-600 transition-colors ${cellBg}`}>{fmt(j.balance)}</td>
+                      <td className={`td !px-2 !py-1.5 text-xs transition-colors ${cellBg}`}>
                         <StatusBadge status={j.status} />
                       </td>
                       <td
-                        className={`td sticky right-0 z-10 w-28 min-w-[110px] text-right border-l border-ink-200/80 shadow-[-3px_0_6px_-2px_rgba(0,0,0,0.06)] transition-colors ${cellBg}`}
+                        className={`td !px-2 !py-1.5 text-xs sticky right-0 z-10 w-20 min-w-[75px] text-right border-l border-ink-200/80 shadow-[-2px_0_4px_-1px_rgba(0,0,0,0.05)] transition-colors ${cellBg}`}
                       >
                         <OrderActionMenu
                           order={j}
