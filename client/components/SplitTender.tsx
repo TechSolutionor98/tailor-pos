@@ -239,10 +239,12 @@ export function SplitTender({
           disabled={disabled}
           onChange={(e) => {
             const val = e.target.value;
-            set(mode, val);
             if (onClear && (val === '0' || (num(val) === 0 && val.trim() !== ''))) {
               onClear(mode);
+              set(mode, '');
+              return;
             }
+            set(mode, val);
           }}
           onFocus={selectOnFocus}
           onWheel={blurOnWheel}
