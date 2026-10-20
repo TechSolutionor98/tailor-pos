@@ -320,11 +320,16 @@ jobCardRouter.get(
     if (status && status !== 'draft') {
       if (status === 'delivered') {
         filter.status = { $in: ['delivered', 'converted'] };
+      } else if (status === 'open' || status === 'pending') {
+        filter.status = { $in: ['open', 'pending'] };
+      } else if (status === 'all_history') {
+        filter.status = { $ne: 'draft' };
       } else {
         filter.status = status;
       }
     } else {
-      filter.status = { $ne: 'draft' };
+      // By default on All Orders, only show pending (open), partially ready, and ready orders
+      filter.status = { $in: ['open', 'pending', 'partially_ready', 'ready'] };
     }
     const [items, total] = await Promise.all([
       JobCard.find(filter).sort({ no: -1 }).skip((page - 1) * limit).limit(limit).lean(),

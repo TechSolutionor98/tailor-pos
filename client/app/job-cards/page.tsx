@@ -261,8 +261,8 @@ function JobCardsInner() {
     return () => clearTimeout(t);
   }, [q, status, load]);
 
-  /** Only an open or partially ready order can be billed — the rest are done or already invoiced. */
-  const convertible = rows.filter((j) => j.status === 'open' || j.status === 'partially_ready');
+  /** Only an open, partially ready, or ready order can be billed — the rest are done or already invoiced. */
+  const convertible = rows.filter((j) => j.status === 'open' || j.status === 'partially_ready' || j.status === 'ready');
   const allPicked = convertible.length > 0 && selected.length === convertible.length;
 
   const toggle = (id: string) =>
@@ -303,7 +303,7 @@ function JobCardsInner() {
     <div>
       <div className="mb-3 flex flex-wrap items-center gap-3">
         <div>
-          <h1 className="page-title">All Order</h1>
+          <h1 className="page-title">All Orders</h1>
           <p className="page-sub">{total} records</p>
         </div>
         <div className="ml-auto flex flex-wrap items-center gap-2">
@@ -334,13 +334,14 @@ function JobCardsInner() {
           />
           <Seg
             options={[
-              { value: '', label: 'All' },
+              { value: '', label: 'All Orders' },
               { value: 'open', label: 'Pending' },
               { value: 'partially_ready', label: 'Partially Ready' },
               { value: 'ready', label: 'Ready' },
               { value: 'closed', label: 'Completed' },
               { value: 'delivered', label: 'Delivered' },
               { value: 'deleted', label: 'Deleted' },
+              { value: 'all_history', label: 'All History' },
             ]}
             value={status}
             onChange={setStatus}
