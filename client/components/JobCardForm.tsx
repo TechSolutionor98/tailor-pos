@@ -537,6 +537,25 @@ export function JobCardForm({ initial, mode }: { initial?: JobCard | null; mode:
       materialsUsed: [],
       materialTotal: calc.materialTotal,
       jobCost: num(jobCost),
+      advance: calc.advance,
+      advanceBeforeTax: calc.advanceBeforeTax,
+      advanceTax: calc.advanceTax,
+      balance: calc.balance,
+      payments: payments.map((p) => ({
+        date: p.date ? toISODate(p.date) : todayISO(),
+        mode: (p.mode === 'credit' ? 'cash' : p.mode) || 'cash',
+        amount: num(p.amount),
+        discount: num(p.discount),
+        bank: p.bank,
+        reference: p.reference,
+        note: p.note,
+        cardHolder: p.cardHolder,
+        cardLast4: p.cardLast4,
+        cardExpiry: p.cardExpiry,
+        accountName: p.accountName,
+        iban: p.iban,
+        swift: p.swift,
+      })),
       paymentMode,
       bank,
       creditCardNo,
@@ -601,7 +620,12 @@ export function JobCardForm({ initial, mode }: { initial?: JobCard | null; mode:
 
   function handleClearMode(m: TenderMode) {
     setSplit((prev) => ({ ...prev, [m]: '' }));
-    setPayments((prev) => prev.filter((p) => (p.mode === 'credit' ? 'cash' : p.mode) !== m));
+    setPayments((prev) =>
+      prev.filter((p) => {
+        const pMode = (p.mode === 'credit' || !p.mode ? 'cash' : p.mode) as TenderMode;
+        return pMode !== m;
+      })
+    );
   }
 
   /**
@@ -723,6 +747,10 @@ export function JobCardForm({ initial, mode }: { initial?: JobCard | null; mode:
         card: num(split.card),
         bank: num(split.bank),
       },
+      payments: payments.map((p) => ({
+        mode: p.mode,
+        amount: num(p.amount),
+      })),
       items: items.map((r) => ({
         code: (r.code ?? '').trim(),
         productName: (r.productName ?? '').trim(),
@@ -760,6 +788,7 @@ export function JobCardForm({ initial, mode }: { initial?: JobCard | null; mode:
     additionalCharges,
     jobCost,
     split,
+    payments,
     items,
     sets,
   ]);
@@ -781,8 +810,8 @@ export function JobCardForm({ initial, mode }: { initial?: JobCard | null; mode:
     (mode === 'new'
       ? hasContent()
       : !readOnly &&
-        initialSnapshotRef.current !== null &&
-        initialSnapshotRef.current !== getSnapshot());
+      initialSnapshotRef.current !== null &&
+      initialSnapshotRef.current !== getSnapshot());
 
   const unsaved = isDirty;
   const leaveGuard = useLeaveGuard(unsaved && !saving);
@@ -1452,11 +1481,10 @@ export function JobCardForm({ initial, mode }: { initial?: JobCard | null; mode:
                                         e.stopPropagation();
                                         toggleItemComplete(i);
                                       }}
-                                      className={`inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-[11px] font-bold transition shadow-sm ${
-                                        r.completed
+                                      className={`inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-[11px] font-bold transition shadow-sm ${r.completed
                                           ? 'bg-emerald-600 text-white hover:bg-emerald-700 ring-1 ring-emerald-500'
                                           : 'border border-ink-200 bg-white text-ink-700 hover:border-emerald-500 hover:bg-emerald-50 hover:text-emerald-800'
-                                      }`}
+                                        }`}
                                       title={r.completed ? 'Single item completed (Click to undo)' : 'Mark this single order item as complete'}
                                     >
                                       <span className="text-xs">{r.completed ? '✓' : '○'}</span>
@@ -1742,6 +1770,19 @@ export function JobCardForm({ initial, mode }: { initial?: JobCard | null; mode:
             {calc.advance > 0 && status !== 'converted' && status !== 'delivered' && (
               <div className="mb-2.5 flex items-center justify-between gap-3 text-xs font-bold">
                 <span className="text-emerald-700">Already Paid: {fmt(calc.advance)} AED</span>
+                {!readOnly && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setPayments([]);
+                      setSplit(emptySplit());
+                    }}
+                    className="text-rose-600 hover:text-rose-700 underline font-semibold text-[11px] cursor-pointer"
+                    title="Remove all advance payments"
+                  >
+                    Remove Advance
+                  </button>
+                )}
               </div>
             )}
 

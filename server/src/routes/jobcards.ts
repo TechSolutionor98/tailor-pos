@@ -201,6 +201,25 @@ interface JobCardBody {
   paymentMode?: 'cash' | 'bank' | 'card';
   bank?: string;
   creditCardNo?: string;
+  advance?: number;
+  advanceBeforeTax?: number;
+  advanceTax?: number;
+  balance?: number;
+  payments?: {
+    date?: string | Date;
+    mode?: string;
+    amount?: number;
+    bank?: string;
+    reference?: string;
+    discount?: number;
+    note?: string;
+    cardHolder?: string;
+    cardLast4?: string;
+    cardExpiry?: string;
+    accountName?: string;
+    iban?: string;
+    swift?: string;
+  }[];
 }
 
 /** Build the computed portions of a stitching order from the request body. */
@@ -240,8 +259,8 @@ function buildComputed(body: JobCardBody) {
     body.materialTotal !== undefined
       ? r2(num(body.materialTotal))
       : r2(
-          [...materialsUsed, ...perPerson].reduce((s, m) => s + m.qty * m.rate, 0),
-        );
+        [...materialsUsed, ...perPerson].reduce((s, m) => s + m.qty * m.rate, 0),
+      );
   return { items, totals, materialsUsed, materialTotal, taxRate };
 }
 
@@ -405,10 +424,28 @@ jobCardRouter.post(
     // the shop's sequence. Nothing is saved part-finished any more.
     const no = await nextSeq('jobcard');
     const computed = buildComputed(body);
+    const initialPayments = Array.isArray(body.payments)
+      ? body.payments
+          .filter((p: any) => p && (num(p.amount) > 0 || num(p.discount) > 0))
+          .map((p: any) => ({
+            date: p.date ? new Date(p.date) : new Date(),
+            mode: (p.mode === 'credit' ? 'cash' : p.mode) || 'cash',
+            amount: r2(num(p.amount)),
+            discount: r2(num(p.discount)),
+            bank: p.bank,
+            reference: p.reference,
+            note: p.note,
+            cardHolder: p.cardHolder,
+            cardLast4: p.cardLast4,
+            cardExpiry: p.cardExpiry,
+            accountName: p.accountName,
+            iban: p.iban,
+            swift: p.swift,
+          }))
+      : [];
+    const paymentsTotal = r2(initialPayments.reduce((s: number, p: any) => s + num(p.amount), 0));
     const advance = r2(
-      ((body as { advance?: number }).advance !== undefined
-        ? num((body as { advance?: number }).advance)
-        : 0) + 0,
+      body.advance !== undefined ? num(body.advance) : paymentsTotal,
     );
     const advSplit = advanceSplit(advance, computed.taxRate);
     const jobCard = await JobCard.create({
@@ -447,7 +484,7 @@ jobCardRouter.post(
       paymentMode: body.paymentMode || 'cash',
       bank: body.bank,
       creditCardNo: body.creditCardNo,
-      payments: [],
+      payments: initialPayments,
       status: computed.items.some((i: any) => i.completed) ? 'partially_ready' : 'open',
     });
     await filePeople(body.ledgerId, body.measurementSets);
@@ -607,6 +644,30 @@ jobCardRouter.put(
     const hasUninvoicedPending = computed.items.some((i: any) => !i.invoiced || !i.completed);
     const hasInvoicedOrCompleted = computed.items.some((i: any) => i.invoiced || i.completed);
 
+    if (body.payments !== undefined) {
+      existing.payments = (Array.isArray(body.payments) ? body.payments : [])
+        .filter((p: any) => p && (num(p.amount) > 0 || num(p.discount) > 0))
+        .map((p: any) => ({
+          date: p.date ? new Date(p.date) : new Date(),
+          mode: (p.mode === 'credit' ? 'cash' : p.mode) || 'cash',
+          amount: r2(num(p.amount)),
+          discount: r2(num(p.discount)),
+          bank: p.bank,
+          reference: p.reference,
+          note: p.note,
+          cardHolder: p.cardHolder,
+          cardLast4: p.cardLast4,
+          cardExpiry: p.cardExpiry,
+          accountName: p.accountName,
+          iban: p.iban,
+          swift: p.swift,
+        }));
+      existing.markModified('payments');
+    } else if (body.advance !== undefined && num(body.advance) === 0) {
+      existing.payments = [];
+      existing.markModified('payments');
+    }
+
     const paymentsTotal = r2(
       existing.payments.reduce((s: number, p: any) => s + num(p.amount), 0),
     );
@@ -678,6 +739,7 @@ jobCardRouter.put(
       advanceBeforeTax: advSplit.advanceBeforeTax,
       advanceTax: advSplit.advanceTax,
       balance: r2(computed.totals.netAmount - advSplit.advance),
+      payments: existing.payments,
       paymentMode: body.paymentMode || existing.paymentMode,
       bank: body.bank ?? existing.bank,
       creditCardNo: body.creditCardNo ?? existing.creditCardNo,
@@ -699,6 +761,7 @@ jobCardRouter.put(
       })(),
     });
     existing.markModified('items');
+    existing.markModified('payments');
     await existing.save();
     await filePeople(String(existing.ledgerId ?? ''), body.measurementSets);
     await recordAudit(req, {
@@ -842,9 +905,8 @@ jobCardRouter.post(
     await recordAudit(req, {
       action: 'payment',
       doc,
-      summary: `Payment of ${r2(num(body.amount))} by ${body.mode || 'cash'}${
-        num(body.discount) > 0 ? ` (discount ${r2(num(body.discount))})` : ''
-      }`,
+      summary: `Payment of ${r2(num(body.amount))} by ${body.mode || 'cash'}${num(body.discount) > 0 ? ` (discount ${r2(num(body.discount))})` : ''
+        }`,
     });
     res.status(201).json(doc);
   }),
@@ -1016,105 +1078,105 @@ interface ConvertBody {
  * and bulk convert routes so both produce exactly the same bill.
  */
 async function convertToSale(doc: any, body: ConvertBody) {
-    const taxRate =
-      body.taxRate !== undefined ? num(body.taxRate, DEFAULT_TAX_RATE) : DEFAULT_TAX_RATE;
-    if (body.payment) applyPayment(doc, body.payment, taxRate);
+  const taxRate =
+    body.taxRate !== undefined ? num(body.taxRate, DEFAULT_TAX_RATE) : DEFAULT_TAX_RATE;
+  if (body.payment) applyPayment(doc, body.payment, taxRate);
 
-    const uninvoiced = ((doc.items as any[]) ?? []).filter((i: any) => !i.invoiced);
-    const isPartiallyProcessed =
-      doc.status === 'partially_ready' ||
-      Boolean(doc.invoiceNo) ||
-      ((doc.items as any[]) ?? []).some((i: any) => i.invoiced || i.completed);
+  const uninvoiced = ((doc.items as any[]) ?? []).filter((i: any) => !i.invoiced);
+  const isPartiallyProcessed =
+    doc.status === 'partially_ready' ||
+    Boolean(doc.invoiceNo) ||
+    ((doc.items as any[]) ?? []).some((i: any) => i.invoiced || i.completed);
 
-    const finalItems = isPartiallyProcessed
-      ? uninvoiced.filter((i: any) => Boolean(i.completed))
-      : uninvoiced;
+  const finalItems = isPartiallyProcessed
+    ? uninvoiced.filter((i: any) => Boolean(i.completed))
+    : uninvoiced;
 
-    if (finalItems.length === 0) {
-      throw new HttpError(
-        400,
-        isPartiallyProcessed
-          ? 'No completed items ready to invoice in this order. Please mark items as Complete first.'
-          : 'All items in this order have already been invoiced',
-      );
-    }
+  if (finalItems.length === 0) {
+    throw new HttpError(
+      400,
+      isPartiallyProcessed
+        ? 'No completed items ready to invoice in this order. Please mark items as Complete first.'
+        : 'All items in this order have already been invoiced',
+    );
+  }
 
-    const items = finalItems.map((i: any) => {
-      const grossAmt = r2(i.amount);
-      const taxAmt = r2(grossAmt * (taxRate / 100));
-      const netAmount = r2(grossAmt + taxAmt);
-      return {
-        code: i.code,
-        productName: i.productName,
-        qty: i.qty,
-        rate: i.rate,
-        netRate: i.qty ? r2(netAmount / i.qty) : 0,
-        discPercent: 0,
-        discAmt: 0,
-        grossAmt,
-        taxPercent: taxRate,
-        taxAmt,
-        netAmount,
-        info: i.completed ? 'Ready' : (doc.status === 'partially_ready' ? 'Pending' : undefined),
-      };
-    });
-    const totQty = r2(items.reduce((s: number, i: any) => s + i.qty, 0));
-    // The order's additional charge rides onto the bill as freight, taxed the
-    // same way, so the invoice comes to what the order said it would.
-    const extra = r2(num(doc.additionalCharges));
-    const extraTax = r2(extra * (taxRate / 100));
-    const grossAmount = r2(items.reduce((s: number, i: any) => s + i.grossAmt, 0) + extra);
-    const taxAmtTotal = r2(items.reduce((s: number, i: any) => s + i.taxAmt, 0) + extraTax);
-    const netAmount = r2(grossAmount + taxAmtTotal);
-    const advanceAmount = r2(doc.advance);
-
-    const billNo = await nextSeq('sale');
-    const sale = await Sale.create({
-      billNo,
-      billDate: body.billDate ? new Date(body.billDate) : new Date(),
-      saleType: 'retail',
-      paymentType: body.paymentType || (r2(netAmount - advanceAmount) > 0 ? 'credit' : 'cash'),
-      category: 'A',
-      jobCardRef: doc.ref,
-      jobCardId: doc._id,
-      salesman: body.salesman || 'GENERAL',
-      partyName: doc.partyName,
-      phone: doc.phone,
-      ledgerId: doc.ledgerId,
-      items,
-      totQty,
-      grossAmount,
-      discountAmt: 0,
-      additionalDiscount: 0,
-      taxAmt: taxAmtTotal,
-      freight: extra,
-      advanceAmount,
+  const items = finalItems.map((i: any) => {
+    const grossAmt = r2(i.amount);
+    const taxAmt = r2(grossAmt * (taxRate / 100));
+    const netAmount = r2(grossAmt + taxAmt);
+    return {
+      code: i.code,
+      productName: i.productName,
+      qty: i.qty,
+      rate: i.rate,
+      netRate: i.qty ? r2(netAmount / i.qty) : 0,
+      discPercent: 0,
+      discAmt: 0,
+      grossAmt,
+      taxPercent: taxRate,
+      taxAmt,
       netAmount,
-      balance: r2(netAmount - advanceAmount),
-      isReturn: false,
-    });
+      info: i.completed ? 'Ready' : (doc.status === 'partially_ready' ? 'Pending' : undefined),
+    };
+  });
+  const totQty = r2(items.reduce((s: number, i: any) => s + i.qty, 0));
+  // The order's additional charge rides onto the bill as freight, taxed the
+  // same way, so the invoice comes to what the order said it would.
+  const extra = r2(num(doc.additionalCharges));
+  const extraTax = r2(extra * (taxRate / 100));
+  const grossAmount = r2(items.reduce((s: number, i: any) => s + i.grossAmt, 0) + extra);
+  const taxAmtTotal = r2(items.reduce((s: number, i: any) => s + i.taxAmt, 0) + extraTax);
+  const netAmount = r2(grossAmount + taxAmtTotal);
+  const advanceAmount = r2(doc.advance);
 
-    for (const it of finalItems) {
-      it.invoiced = true;
-      it.completed = true;
-      it.invoiceNo = `B-${billNo}`;
-    }
+  const billNo = await nextSeq('sale');
+  const sale = await Sale.create({
+    billNo,
+    billDate: body.billDate ? new Date(body.billDate) : new Date(),
+    saleType: 'retail',
+    paymentType: body.paymentType || (r2(netAmount - advanceAmount) > 0 ? 'credit' : 'cash'),
+    category: 'A',
+    jobCardRef: doc.ref,
+    jobCardId: doc._id,
+    salesman: body.salesman || 'GENERAL',
+    partyName: doc.partyName,
+    phone: doc.phone,
+    ledgerId: doc.ledgerId,
+    items,
+    totQty,
+    grossAmount,
+    discountAmt: 0,
+    additionalDiscount: 0,
+    taxAmt: taxAmtTotal,
+    freight: extra,
+    advanceAmount,
+    netAmount,
+    balance: r2(netAmount - advanceAmount),
+    isReturn: false,
+  });
 
-    const allInvoiced = (doc.items as any[])?.every((i: any) => i.invoiced);
-    const hasPendingItems = (doc.items as any[])?.some((i: any) => !i.invoiced || !i.completed);
-    if (allInvoiced) {
-      doc.status = 'delivered';
-    } else if (hasPendingItems) {
-      doc.status = 'partially_ready';
-    } else {
-      doc.status = 'ready';
-    }
-    if (!doc.invoiceNo?.includes(`B-${billNo}`)) {
-      doc.invoiceNo = doc.invoiceNo ? `${doc.invoiceNo}, B-${billNo}` : `B-${billNo}`;
-    }
-    await doc.save();
+  for (const it of finalItems) {
+    it.invoiced = true;
+    it.completed = true;
+    it.invoiceNo = `B-${billNo}`;
+  }
 
-    return sale;
+  const allInvoiced = (doc.items as any[])?.every((i: any) => i.invoiced);
+  const hasPendingItems = (doc.items as any[])?.some((i: any) => !i.invoiced || !i.completed);
+  if (allInvoiced) {
+    doc.status = 'delivered';
+  } else if (hasPendingItems) {
+    doc.status = 'partially_ready';
+  } else {
+    doc.status = 'ready';
+  }
+  if (!doc.invoiceNo?.includes(`B-${billNo}`)) {
+    doc.invoiceNo = doc.invoiceNo ? `${doc.invoiceNo}, B-${billNo}` : `B-${billNo}`;
+  }
+  await doc.save();
+
+  return sale;
 }
 
 // POST /jobcards/:id/convert -> creates a Sale, marks the order delivered

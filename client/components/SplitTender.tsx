@@ -237,7 +237,13 @@ export function SplitTender({
           inputMode="decimal"
           value={value[mode]}
           disabled={disabled}
-          onChange={(e) => set(mode, e.target.value)}
+          onChange={(e) => {
+            const val = e.target.value;
+            set(mode, val);
+            if (onClear && (val === '0' || (num(val) === 0 && val.trim() !== ''))) {
+              onClear(mode);
+            }
+          }}
           onFocus={selectOnFocus}
           onWheel={blurOnWheel}
           placeholder="0"
@@ -478,9 +484,8 @@ export function SplitTender({
                     e.stopPropagation();
                     if (onClear) {
                       onClear(m.value);
-                    } else {
-                      set(m.value, '');
                     }
+                    set(m.value, '');
                   }}
                   title={`Clear ${m.label} amount`}
                   aria-label={`Clear ${m.label}`}
