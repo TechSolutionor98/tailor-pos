@@ -117,6 +117,8 @@ export function SaleForm() {
 
   const [discountType, setDiscountType] = useState<'percent' | 'fixed'>('fixed');
   const [discountInput, setDiscountInput] = useState('0');
+  const [additionalChargesType, setAdditionalChargesType] = useState<'percent' | 'fixed'>('fixed');
+  const [additionalChargesInput, setAdditionalChargesInput] = useState('0');
   const [advanceBreakdown, setAdvanceBreakdown] = useState<Record<TenderMode, number>>({
     cash: 0,
     card: 0,
@@ -177,10 +179,13 @@ export function SaleForm() {
         pendingOrderItems.reduce((s, p) => s + (num(p.qty) || 1), 0),
     );
 
+    const extraIn = num(additionalChargesInput);
+    const extra =
+      additionalChargesType === 'percent' ? r2((total * extraIn) / 100) : r2(extraIn);
     const dIn = num(discountInput);
     const orderDiscount =
-      discountType === 'percent' ? r2((total * dIn) / 100) : r2(Math.min(dIn, total));
-    const taxable = r2(Math.max(total - orderDiscount, 0));
+      discountType === 'percent' ? r2((total * dIn) / 100) : r2(Math.min(dIn, total + extra));
+    const taxable = r2(Math.max(total + extra - orderDiscount, 0));
     const tax = r2((taxable * taxRate) / 100);
     const payable = r2(taxable + tax);
 
@@ -208,6 +213,9 @@ export function SaleForm() {
       pendingTotal,
       allProductsTotal: total,
       total,
+      additionalCharges: extra,
+      additionalChargesType,
+      additionalChargesInput: extraIn,
       orderDiscount,
       taxable,
       tax,
@@ -221,7 +229,17 @@ export function SaleForm() {
       balance,
       changeReturn,
     };
-  }, [rows, pendingOrderItems, discountType, discountInput, taxRate, advancePaid, split]);
+  }, [
+    rows,
+    pendingOrderItems,
+    discountType,
+    discountInput,
+    additionalChargesType,
+    additionalChargesInput,
+    taxRate,
+    advancePaid,
+    split,
+  ]);
 
   const materialCalc = useMemo(() => {
     const lines = materials.map((m) => {
@@ -372,6 +390,11 @@ export function SaleForm() {
         );
       } else {
         setMaterials([emptyMaterialRow()]);
+      }
+
+      if (s.additionalCharges || (s as any).additionalChargesInput) {
+        setAdditionalChargesType((s as any).additionalChargesType || 'fixed');
+        setAdditionalChargesInput(String((s as any).additionalChargesInput ?? s.additionalCharges));
       }
 
       if (s.discountInput || s.additionalDiscount) {
@@ -539,9 +562,14 @@ export function SaleForm() {
         setMaterials([emptyMaterialRow()]);
       }
 
-      if (j.discount) {
-        setDiscountType('fixed');
-        setDiscountInput(String(j.discount));
+      if (j.additionalCharges || (j as any).additionalChargesInput) {
+        setAdditionalChargesType((j as any).additionalChargesType || 'fixed');
+        setAdditionalChargesInput(String((j as any).additionalChargesInput ?? j.additionalCharges));
+      }
+
+      if (j.discount || (j as any).discountInput) {
+        setDiscountType((j as any).discountType || 'fixed');
+        setDiscountInput(String((j as any).discountInput ?? j.discount));
       }
       if (j.ledgerId) {
         try {
@@ -672,6 +700,9 @@ export function SaleForm() {
             rate: num(m.rate),
           })),
         materialTotal: materialCalc.total,
+        additionalCharges: calc.additionalCharges,
+        additionalChargesType,
+        additionalChargesInput: num(additionalChargesInput),
         discountType,
         discountInput: num(discountInput),
         advanceAmount: r2(totalCash + totalCard + totalBank),
@@ -735,9 +766,9 @@ export function SaleForm() {
 
   return (
     <div className="pb-16 text-[12px]">
-      <div className="flex flex-col xl:flex-row items-start">
+      <div className="flex flex-col lg:flex-row items-start">
         {/* Left Column: Header details & Sale Items table */}
-        <Card className="w-full min-w-0 flex-1 rounded-none border-x-0 border-t-0 xl:border-r">
+        <Card className="w-full min-w-0 flex-1 rounded-none border-x-0 border-t-0 lg:border-r">
           {/* Header fields */}
           <section className="p-4 sm:p-5">
             <div className="mb-5 flex items-baseline justify-center gap-3">
@@ -1149,6 +1180,70 @@ export function SaleForm() {
                 </span>
               </div>
             </div>
+
+            {/* Additional Charges & Discount toolbar */}
+            <div className="mt-3 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-ink-200/80 bg-ink-50/60 p-3">
+              <div className="flex flex-wrap items-center gap-4 sm:gap-6">
+                {/* Additional Charges */}
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-bold text-ink-700">Additional Charges:</span>
+                  <div className="flex items-center gap-1.5">
+                    <select
+                      value={additionalChargesType}
+                      onChange={(e) => setAdditionalChargesType(e.target.value as 'fixed' | 'percent')}
+                      className="input-sm !w-20 !py-1 text-xs font-bold bg-white border border-ink-200 rounded-lg cursor-pointer text-ink-700 shadow-xs"
+                    >
+                      <option value="fixed">AED</option>
+                      <option value="percent">%</option>
+                    </select>
+                    <NumberInput
+                      value={additionalChargesInput}
+                      onChange={(e) => setAdditionalChargesInput(e.target.value)}
+                      className="input-sm !w-24 text-right font-semibold"
+                      placeholder="0"
+                    />
+                  </div>
+                </div>
+
+                {/* Discount with Currency (AED) or % */}
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-bold text-ink-700">Discount:</span>
+                  <div className="flex items-center gap-1.5">
+                    <select
+                      value={discountType}
+                      onChange={(e) => setDiscountType(e.target.value as 'fixed' | 'percent')}
+                      className="input-sm !w-20 !py-1 text-xs font-bold bg-white border border-ink-200 rounded-lg cursor-pointer text-ink-700 shadow-xs"
+                    >
+                      <option value="fixed">AED</option>
+                      <option value="percent">%</option>
+                    </select>
+                    <NumberInput
+                      value={discountInput}
+                      onChange={(e) => setDiscountInput(e.target.value)}
+                      className="input-sm !w-24 text-right font-semibold"
+                      placeholder="0"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Subtotal preview right-aligned */}
+              <div className="flex flex-wrap items-center gap-3 sm:gap-4 text-xs font-bold text-ink-700 ml-auto">
+                {calc.additionalCharges > 0 && (
+                  <span className="text-emerald-700">
+                    +Charges: <span className="tabular-nums font-black">{fmt(calc.additionalCharges)} AED</span>
+                  </span>
+                )}
+                {calc.orderDiscount > 0 && (
+                  <span className="text-rose-600">
+                    -Discount: <span className="tabular-nums font-black">{fmt(calc.orderDiscount)} AED</span>
+                  </span>
+                )}
+                <span className="text-ink-900">
+                  Total Before Tax: <span className="tabular-nums font-extrabold text-brand-800">{fmt(calc.taxable)} AED</span>
+                </span>
+              </div>
+            </div>
           </section>
 
           {/* materials used section */}
@@ -1312,8 +1407,8 @@ export function SaleForm() {
         </Card>
 
         {/* Right Column: Payment Scenario matching JobCardForm */}
-        <div className="w-full xl:w-[325px] 2xl:w-[340px] shrink-0">
-          <Card className="sticky top-16 max-h-[calc(100vh-4rem)] overflow-y-auto rounded-none border-x-0 border-t-0 p-4">
+        <div className="w-full lg:w-[325px] 2xl:w-[340px] shrink-0 lg:sticky lg:top-16 self-start">
+          <Card className="max-h-[calc(100vh-4.5rem)] overflow-y-auto rounded-none border-x-0 border-t-0 p-4">
 
             <div className="space-y-1.5 text-xs">
               <div className="flex items-center justify-between">
@@ -1326,23 +1421,45 @@ export function SaleForm() {
                   <span className="font-semibold tabular-nums">{fmt(materialCalc.total)} AED</span>
                 </div>
               )}
-              <div className="flex items-center justify-between gap-3">
-                <span className="font-medium text-ink-500">Discount</span>
+              {/* Additional Charges */}
+              <div className="flex items-center justify-between gap-2">
                 <div className="flex items-center gap-1.5">
-                  <NumberInput
-                    value={discountInput}
-                    onChange={(e) => setDiscountInput(e.target.value)}
-                    className="input-sm !w-24 text-right"
-                  />
+                  <span className="font-medium text-ink-500">Additional Charges</span>
                   <Select
-                    value={discountType}
-                    onChange={(e) => setDiscountType(e.target.value as 'fixed' | 'percent')}
-                    className="input-sm !w-20 !py-1 text-[11px]"
+                    value={additionalChargesType}
+                    onChange={(e) => setAdditionalChargesType(e.target.value as 'fixed' | 'percent')}
+                    className="input-sm !w-[68px] !py-0.5 !px-1.5 text-[11px] font-semibold"
                   >
                     <option value="fixed">AED</option>
                     <option value="percent">%</option>
                   </Select>
                 </div>
+                <NumberInput
+                  value={additionalChargesInput}
+                  onChange={(e) => setAdditionalChargesInput(e.target.value)}
+                  className="input-sm !w-24 text-right"
+                  placeholder="0"
+                />
+              </div>
+              {/* Discount */}
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-1.5">
+                  <span className="font-medium text-ink-500">Discount</span>
+                  <Select
+                    value={discountType}
+                    onChange={(e) => setDiscountType(e.target.value as 'fixed' | 'percent')}
+                    className="input-sm !w-[68px] !py-0.5 !px-1.5 text-[11px] font-semibold"
+                  >
+                    <option value="fixed">AED</option>
+                    <option value="percent">%</option>
+                  </Select>
+                </div>
+                <NumberInput
+                  value={discountInput}
+                  onChange={(e) => setDiscountInput(e.target.value)}
+                  className="input-sm !w-24 text-right"
+                  placeholder="0"
+                />
               </div>
               <div className="flex items-center justify-between border-t border-ink-100 pt-1.5">
                 <span className="font-medium text-ink-500">Total Before Tax</span>

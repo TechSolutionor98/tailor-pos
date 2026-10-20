@@ -68,6 +68,9 @@ interface SaleBody {
   materialTotal?: number;
   bookingNo?: string;
   refNo?: string;
+  additionalCharges?: number;
+  additionalChargesType?: 'percent' | 'fixed';
+  additionalChargesInput?: number;
   additionalDiscount?: number;
   discountType?: 'percent' | 'fixed';
   discountInput?: number;
@@ -194,15 +197,21 @@ saleRouter.post(
     const grossAmount = r2(base.reduce((s, i) => s + i.grossAmt, 0));
     const lineDisc = r2(base.reduce((s, i) => s + i.discAmt, 0));
 
+    const extraInput = num(body.additionalChargesInput, num(body.additionalCharges));
+    const additionalCharges =
+      body.additionalChargesType === 'percent'
+        ? r2((grossAmount * extraInput) / 100)
+        : r2(extraInput);
+
     // The bill-wide discount comes off before tax, so tax is charged on what
     // the customer actually owes.
     const discountInput = r2(num(body.discountInput, num(body.additionalDiscount)));
     const additionalDiscount =
-      body.discountType === 'fixed' || body.discountType === undefined
-        ? r2(Math.min(discountInput, grossAmount))
-        : r2((grossAmount * discountInput) / 100);
+      body.discountType === 'percent'
+        ? r2((grossAmount * discountInput) / 100)
+        : r2(Math.min(discountInput, grossAmount + additionalCharges));
     const discountAmt = r2(lineDisc + additionalDiscount);
-    const taxable = Math.max(r2(grossAmount - additionalDiscount), 0);
+    const taxable = Math.max(r2(grossAmount + additionalCharges - additionalDiscount), 0);
     const taxAmt = r2((taxable * taxPercent) / 100);
     const freight = r2(num(body.freight));
     const netAmount = r2(taxable + taxAmt + freight);
@@ -265,7 +274,10 @@ saleRouter.post(
       grossAmount,
       discountAmt,
       additionalDiscount,
-      discountType: body.discountType === 'fixed' ? 'fixed' : 'percent',
+      additionalCharges,
+      additionalChargesType: body.additionalChargesType === 'percent' ? 'percent' : 'fixed',
+      additionalChargesInput: extraInput,
+      discountType: body.discountType === 'percent' ? 'percent' : 'fixed',
       discountInput,
       taxAmt,
       freight,

@@ -71,7 +71,11 @@ export interface IJobCard extends Document {
   total: number;
   /** Express work, delivery and the like — taxed with the order. */
   additionalCharges: number;
+  additionalChargesType?: 'percent' | 'fixed';
+  additionalChargesInput?: number;
   discount: number;
+  discountType?: 'percent' | 'fixed';
+  discountInput?: number;
   tax: number;
   netAmount: number;
   /** Legacy single set — kept so old cards and prints still work. */
@@ -180,7 +184,11 @@ const jobCardSchema = new Schema<IJobCard>(
     items: { type: [itemSchema], default: [] },
     total: { type: Number, default: 0 },
     additionalCharges: { type: Number, default: 0 },
+    additionalChargesType: { type: String, enum: ['percent', 'fixed'], default: 'fixed' },
+    additionalChargesInput: { type: Number, default: 0 },
     discount: { type: Number, default: 0 },
+    discountType: { type: String, enum: ['percent', 'fixed'], default: 'fixed' },
+    discountInput: { type: Number, default: 0 },
     tax: { type: Number, default: 0 },
     netAmount: { type: Number, default: 0 },
     measurements: { type: Schema.Types.Mixed, default: {} },

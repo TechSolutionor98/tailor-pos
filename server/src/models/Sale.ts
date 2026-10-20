@@ -52,6 +52,9 @@ export interface ISale extends Document {
   grossAmount: number;
   discountAmt: number;
   additionalDiscount: number;
+  additionalCharges?: number;
+  additionalChargesType?: 'percent' | 'fixed';
+  additionalChargesInput?: number;
   /** The bill-wide discount as it was entered — a rate or a flat sum. */
   discountType?: 'percent' | 'fixed';
   discountInput?: number;
@@ -156,6 +159,9 @@ const saleSchema = new Schema<ISale>(
     grossAmount: { type: Number, default: 0 },
     discountAmt: { type: Number, default: 0 },
     additionalDiscount: { type: Number, default: 0 },
+    additionalCharges: { type: Number, default: 0 },
+    additionalChargesType: { type: String, enum: ['percent', 'fixed'], default: 'fixed' },
+    additionalChargesInput: { type: Number, default: 0 },
     discountType: { type: String, enum: ['percent', 'fixed'], default: 'percent' },
     discountInput: { type: Number, default: 0 },
     taxAmt: { type: Number, default: 0 },

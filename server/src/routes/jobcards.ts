@@ -116,6 +116,10 @@ function searchFilter(q?: string) {
 interface JobCardBody {
   status?: string;
   additionalCharges?: number;
+  additionalChargesType?: 'percent' | 'fixed';
+  additionalChargesInput?: number;
+  discountType?: 'percent' | 'fixed';
+  discountInput?: number;
   bookNo?: number;
   ref?: string;
   date?: string;
@@ -178,7 +182,18 @@ function buildComputed(body: JobCardBody) {
       invoiced: Boolean(i.invoiced),
       invoiceNo: i.invoiceNo || undefined,
     }));
-  const totals = jobCardTotals(items, num(body.discount), taxRate, num(body.additionalCharges));
+  const rawTotal = r2(items.reduce((s, i) => s + (i.amount || 0), 0));
+  const extraInput = num(body.additionalChargesInput, num(body.additionalCharges));
+  const extraCharges =
+    body.additionalChargesType === 'percent'
+      ? r2((rawTotal * extraInput) / 100)
+      : r2(extraInput);
+  const dInput = num(body.discountInput, num(body.discount));
+  const discountAmt =
+    body.discountType === 'percent'
+      ? r2((rawTotal * dInput) / 100)
+      : r2(dInput);
+  const totals = jobCardTotals(items, discountAmt, taxRate, extraCharges);
   // Legacy orders kept one shared list; materials now sit on each person.
   const materialsUsed = cleanMaterials(body.materialsUsed);
   const perPerson = (cleanMeasurementSets(body.measurementSets, body.partyName) ?? []).flatMap(
@@ -374,7 +389,11 @@ jobCardRouter.post(
       items: computed.items,
       total: computed.totals.total,
       additionalCharges: computed.totals.additionalCharges,
+      additionalChargesType: body.additionalChargesType === 'percent' ? 'percent' : 'fixed',
+      additionalChargesInput: body.additionalChargesInput !== undefined ? r2(num(body.additionalChargesInput)) : computed.totals.additionalCharges,
       discount: computed.totals.discount,
+      discountType: body.discountType === 'percent' ? 'percent' : 'fixed',
+      discountInput: body.discountInput !== undefined ? r2(num(body.discountInput)) : computed.totals.discount,
       tax: computed.totals.tax,
       netAmount: computed.totals.netAmount,
       measurements: body.measurements ?? {},
@@ -596,7 +615,19 @@ jobCardRouter.put(
       items: computed.items,
       total: computed.totals.total,
       additionalCharges: computed.totals.additionalCharges,
+      additionalChargesType: body.additionalChargesType
+        ? (body.additionalChargesType === 'percent' ? 'percent' : 'fixed')
+        : (existing as any).additionalChargesType,
+      additionalChargesInput: body.additionalChargesInput !== undefined
+        ? r2(num(body.additionalChargesInput))
+        : (existing as any).additionalChargesInput,
       discount: computed.totals.discount,
+      discountType: body.discountType
+        ? (body.discountType === 'percent' ? 'percent' : 'fixed')
+        : (existing as any).discountType,
+      discountInput: body.discountInput !== undefined
+        ? r2(num(body.discountInput))
+        : (existing as any).discountInput,
       tax: computed.totals.tax,
       netAmount: computed.totals.netAmount,
       measurements: existing.measurements,

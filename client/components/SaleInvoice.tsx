@@ -95,7 +95,12 @@ export function SaleInvoice({
   );
 
   const taxRate = settings.taxRate ?? 5;
-  const taxable = Math.max(Math.round(((sale.grossAmount || 0) - (sale.discountAmt || 0)) * 100) / 100, 0);
+  const taxable = Math.max(
+    Math.round(
+      ((sale.grossAmount || 0) + (sale.additionalCharges || 0) - (sale.discountAmt || 0)) * 100,
+    ) / 100,
+    0,
+  );
 
   // Payment method formatting
   const method = sale.paymentMethod || sale.paymentType || 'cash';
@@ -470,6 +475,13 @@ export function SaleInvoice({
                 ar="المجموع الفرعي"
                 value={`AED ${fmt(sale.grossAmount || 0)}`}
               />
+              {(sale.additionalCharges || 0) > 0 && (
+                <TotalRow
+                  en="Additional Charges"
+                  ar="رسوم إضافية"
+                  value={`AED ${fmt(sale.additionalCharges || 0)}`}
+                />
+              )}
               {(sale.discountAmt || 0) > 0 && (
                 <TotalRow
                   en="Discount"

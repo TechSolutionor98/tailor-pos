@@ -226,7 +226,11 @@ export interface JobCard {
   items: JobCardItem[];
   total: number;
   additionalCharges: number;
+  additionalChargesType?: 'percent' | 'fixed';
+  additionalChargesInput?: number;
   discount: number;
+  discountType?: 'percent' | 'fixed';
+  discountInput?: number;
   tax: number;
   netAmount: number;
   measurements: Record<string, string>;
@@ -301,6 +305,9 @@ export interface Sale {
   grossAmount: number;
   discountAmt: number;
   additionalDiscount: number;
+  additionalCharges?: number;
+  additionalChargesType?: 'percent' | 'fixed';
+  additionalChargesInput?: number;
   discountType?: 'percent' | 'fixed';
   discountInput?: number;
   taxAmt: number;

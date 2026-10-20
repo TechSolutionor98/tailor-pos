@@ -25,6 +25,7 @@ import {
   DateInput,
   Field,
   NumberInput,
+  Select,
   StatusBadge,
   TextInput,
 } from './ui';
@@ -172,9 +173,17 @@ export function JobCardForm({ initial, mode }: { initial?: JobCard | null; mode:
     }
     return [emptyItem(sets[0]?.uid ?? '')];
   });
-  const [discount, setDiscount] = useState(String(initial?.discount ?? '0'));
+  const [discountType, setDiscountType] = useState<'percent' | 'fixed'>(
+    (initial as any)?.discountType || 'fixed',
+  );
+  const [discount, setDiscount] = useState(
+    String((initial as any)?.discountInput ?? initial?.discount ?? '0'),
+  );
+  const [additionalChargesType, setAdditionalChargesType] = useState<'percent' | 'fixed'>(
+    (initial as any)?.additionalChargesType || 'fixed',
+  );
   const [additionalCharges, setAdditionalCharges] = useState(
-    String(initial?.additionalCharges ?? '0'),
+    String((initial as any)?.additionalChargesInput ?? initial?.additionalCharges ?? '0'),
   );
   // No longer asked for on the form. Kept so that re-saving an order written
   // before the field was removed does not strip what it was saved with.
@@ -294,8 +303,12 @@ export function JobCardForm({ initial, mode }: { initial?: JobCard | null; mode:
     const total = r2(rows.reduce((s, r) => s + r.amount, 0));
     // Charges join the taxable base beside the items, exactly as the server
     // computes it — the two must never disagree.
-    const extra = r2(num(additionalCharges));
-    const d = r2(num(discount));
+    const extraIn = num(additionalCharges);
+    const extra =
+      additionalChargesType === 'percent' ? r2((total * extraIn) / 100) : r2(extraIn);
+    const dIn = num(discount);
+    const d =
+      discountType === 'percent' ? r2((total * dIn) / 100) : r2(Math.min(dIn, total + extra));
     const taxable = Math.max(total + extra - d, 0);
     const tax = r2(taxable * (taxRate / 100));
     const netAmount = r2(taxable + tax);
@@ -310,8 +323,36 @@ export function JobCardForm({ initial, mode }: { initial?: JobCard | null; mode:
     const charged = rows.filter((r) => r.productName?.trim() || r.amount > 0);
     const itemCount = charged.length;
     const qtyCount = r2(charged.reduce((s, r) => s + r.qty, 0));
-    return { rows, total, additionalCharges: extra, discount: d, taxable, tax, netAmount, advance, advanceBeforeTax, advanceTax, balance, materialTotal, itemCount, qtyCount };
-  }, [items, discount, additionalCharges, payments, sets, taxRate]);
+    return {
+      rows,
+      total,
+      additionalCharges: extra,
+      additionalChargesType,
+      additionalChargesInput: extraIn,
+      discount: d,
+      discountType,
+      discountInput: dIn,
+      taxable,
+      tax,
+      netAmount,
+      advance,
+      advanceBeforeTax,
+      advanceTax,
+      balance,
+      materialTotal,
+      itemCount,
+      qtyCount,
+    };
+  }, [
+    items,
+    discount,
+    discountType,
+    additionalCharges,
+    additionalChargesType,
+    payments,
+    sets,
+    taxRate,
+  ]);
 
   const advanceBreakdown = useMemo(() => {
     const bd: Record<TenderMode, number> = { cash: 0, card: 0, bank: 0 };
@@ -455,7 +496,11 @@ export function JobCardForm({ initial, mode }: { initial?: JobCard | null; mode:
           personUid: sets.some((p) => p.uid === r.personUid) ? r.personUid : undefined,
         })),
       additionalCharges: calc.additionalCharges,
+      additionalChargesType,
+      additionalChargesInput: num(additionalCharges),
       discount: calc.discount,
+      discountType,
+      discountInput: num(discount),
       taxRate,
       // The first person also fills the legacy fields, so older prints and any
       // card saved before this feature keep rendering.
@@ -1073,8 +1118,8 @@ export function JobCardForm({ initial, mode }: { initial?: JobCard | null; mode:
       )}
 
 
-      <div className={`flex flex-col xl:flex-row items-start ${isCompleted ? 'form-completed-dull' : ''}`}>
-        <Card className="w-full min-w-0 flex-1 rounded-none border-x-0 border-t-0 xl:border-r">
+      <div className={`flex flex-col lg:flex-row items-start ${isCompleted ? 'form-completed-dull' : ''}`}>
+        <Card className="w-full min-w-0 flex-1 rounded-none border-x-0 border-t-0 lg:border-r">
           {/* header fields */}
           <section className="p-5">
             {/* The number the order is called, set over the form rather than
@@ -1401,6 +1446,74 @@ export function JobCardForm({ initial, mode }: { initial?: JobCard | null; mode:
                 </tbody>
               </table>
             </div>
+
+            {/* Additional Charges & Discount toolbar */}
+            <div className="mt-3 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-ink-200/80 bg-ink-50/60 p-3">
+              <div className="flex flex-wrap items-center gap-4 sm:gap-6">
+                {/* Additional Charges */}
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-bold text-ink-700">Additional Charges:</span>
+                  <div className="flex items-center gap-1.5">
+                    <select
+                      value={additionalChargesType}
+                      onChange={(e) => setAdditionalChargesType(e.target.value as 'fixed' | 'percent')}
+                      disabled={readOnly}
+                      className="input-sm !w-20 !py-1 text-xs font-bold bg-white border border-ink-200 rounded-lg cursor-pointer text-ink-700 shadow-xs"
+                    >
+                      <option value="fixed">AED</option>
+                      <option value="percent">%</option>
+                    </select>
+                    <NumberInput
+                      value={additionalCharges}
+                      onChange={(e) => setAdditionalCharges(e.target.value)}
+                      disabled={readOnly}
+                      className="input-sm !w-24 text-right font-semibold"
+                      placeholder="0"
+                    />
+                  </div>
+                </div>
+
+                {/* Discount with Currency (AED) or % */}
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-bold text-ink-700">Discount:</span>
+                  <div className="flex items-center gap-1.5">
+                    <select
+                      value={discountType}
+                      onChange={(e) => setDiscountType(e.target.value as 'fixed' | 'percent')}
+                      disabled={readOnly}
+                      className="input-sm !w-20 !py-1 text-xs font-bold bg-white border border-ink-200 rounded-lg cursor-pointer text-ink-700 shadow-xs"
+                    >
+                      <option value="fixed">AED</option>
+                      <option value="percent">%</option>
+                    </select>
+                    <NumberInput
+                      value={discount}
+                      onChange={(e) => setDiscount(e.target.value)}
+                      disabled={readOnly}
+                      className="input-sm !w-24 text-right font-semibold"
+                      placeholder="0"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Subtotal preview right-aligned */}
+              <div className="flex flex-wrap items-center gap-3 sm:gap-4 text-xs font-bold text-ink-700 ml-auto">
+                {calc.additionalCharges > 0 && (
+                  <span className="text-emerald-700">
+                    +Charges: <span className="tabular-nums font-black">{fmt(calc.additionalCharges)} AED</span>
+                  </span>
+                )}
+                {calc.discount > 0 && (
+                  <span className="text-rose-600">
+                    -Discount: <span className="tabular-nums font-black">{fmt(calc.discount)} AED</span>
+                  </span>
+                )}
+                <span className="text-ink-900">
+                  Total Before Tax: <span className="tabular-nums font-extrabold text-brand-800">{fmt(calc.taxable)} AED</span>
+                </span>
+              </div>
+            </div>
           </section>
 
           {/* measurements — one block per person on this order */}
@@ -1484,8 +1597,8 @@ export function JobCardForm({ initial, mode }: { initial?: JobCard | null; mode:
         </Card>
 
         {/* right payment panel */}
-        <div className="w-full xl:w-[325px] 2xl:w-[340px] shrink-0">
-          <Card className="sticky top-16 max-h-[calc(100vh-4rem)] overflow-y-auto rounded-none border-x-0 border-t-0 p-4">
+        <div className="w-full lg:w-[325px] 2xl:w-[340px] shrink-0 lg:sticky lg:top-16 self-start">
+          <Card className="max-h-[calc(100vh-4.5rem)] overflow-y-auto rounded-none border-x-0 border-t-0 p-4">
             {/* The chain the counter reads out, in the order the money is
                 actually worked out: what the goods come to, what is added or
                 taken off, the tax on the result, then the one figure the
@@ -1496,22 +1609,46 @@ export function JobCardForm({ initial, mode }: { initial?: JobCard | null; mode:
                 <span className="font-medium text-ink-500">Total without Tax</span>
                 <span className="font-bold tabular-nums">{fmt(calc.total)} AED</span>
               </div>
-              <div className="flex items-center justify-between gap-3">
-                <span className="font-medium text-ink-500">Additional Charges</span>
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-1.5">
+                  <span className="font-medium text-ink-500">Additional Charges</span>
+                  <Select
+                    value={additionalChargesType}
+                    onChange={(e) => setAdditionalChargesType(e.target.value as 'fixed' | 'percent')}
+                    disabled={readOnly}
+                    className="input-sm !w-[68px] !py-0.5 !px-1.5 text-[11px] font-semibold"
+                  >
+                    <option value="fixed">AED</option>
+                    <option value="percent">%</option>
+                  </Select>
+                </div>
                 <NumberInput
                   value={additionalCharges}
                   onChange={(e) => setAdditionalCharges(e.target.value)}
                   disabled={readOnly}
-                  className="input-sm !w-28"
+                  className="input-sm !w-24 text-right"
+                  placeholder="0"
                 />
               </div>
-              <div className="flex items-center justify-between gap-3">
-                <span className="font-medium text-ink-500">Discount</span>
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-1.5">
+                  <span className="font-medium text-ink-500">Discount</span>
+                  <Select
+                    value={discountType}
+                    onChange={(e) => setDiscountType(e.target.value as 'fixed' | 'percent')}
+                    disabled={readOnly}
+                    className="input-sm !w-[68px] !py-0.5 !px-1.5 text-[11px] font-semibold"
+                  >
+                    <option value="fixed">AED</option>
+                    <option value="percent">%</option>
+                  </Select>
+                </div>
                 <NumberInput
                   value={discount}
                   onChange={(e) => setDiscount(e.target.value)}
                   disabled={readOnly}
-                  className="input-sm !w-28"
+                  className="input-sm !w-24 text-right"
+                  placeholder="0"
                 />
               </div>
               <div className="flex items-center justify-between border-t border-ink-100 pt-1.5">
