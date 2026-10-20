@@ -8,7 +8,7 @@ import type { JobCard, Ledger, LedgerDue, Product, SavedBank, SavedCard, Sale } 
 import { useSettings } from './SettingsContext';
 import { useToast } from './Toast';
 import { useAuth } from './AuthContext';
-import { blurOnWheel, Card, NumberInput, Select, selectOnFocus, TextInput } from './ui';
+import { blurOnWheel, Card, NumberInput, Select, selectOnFocus, StatusBadge, TextInput } from './ui';
 import { Modal } from './Modal';
 import { LedgerSearchModal } from './LedgerSearchModal';
 import { LedgerSearchInput } from './LedgerSearchInput';
@@ -141,6 +141,10 @@ export function SaleForm() {
   const [jcQ, setJcQ] = useState('');
   const [jcRows, setJcRows] = useState<JobCard[]>([]);
   const [saleRows, setSaleRows] = useState<Sale[]>([]);
+  const [searching, setSearching] = useState(false);
+  const [hasSearched, setHasSearched] = useState(false);
+  const [updatingStatusId, setUpdatingStatusId] = useState<string | null>(null);
+  const [activeActionId, setActiveActionId] = useState<string | null>(null);
 
   const hasCompleted = useMemo(() => rows.some((r) => r.completed === true), [rows]);
 
@@ -312,6 +316,9 @@ export function SaleForm() {
     setLedgerId(l._id);
     setSavedCards(l.savedCards ?? []);
     setSavedBanks(l.savedBanks ?? []);
+    if (!bookingNo && l.latestBookNo != null) {
+      setBookingNo(String(l.latestBookNo));
+    }
   }
 
   function step(i: number, by: number) {
@@ -335,22 +342,65 @@ export function SaleForm() {
     updateMaterial(i, { qty: String(r2(next)) });
   }
 
-  async function searchJobCards() {
+  async function searchJobCards(queryOverride?: string, ledgerIdOverride?: string) {
+    const q = queryOverride !== undefined ? queryOverride : jcQ;
+    const isSameParty = partyName && q && q.trim().toLowerCase() === partyName.trim().toLowerCase();
+    const lid = ledgerIdOverride !== undefined ? ledgerIdOverride : (isSameParty ? ledgerId : '');
+    setSearching(true);
+    setHasSearched(true);
     try {
       if (isReturn) {
         const [salesRes, jcRes] = await Promise.all([
-          api.sales.list(jcQ, 1, 20, false),
-          api.jobCards.list(jcQ, '', 1, 20),
+          api.sales.list(q, 1, 30, false, lid),
+          api.jobCards.list(q, '', 1, 30, lid),
         ]);
         setSaleRows(salesRes.items || []);
         setJcRows(jcRes.items || []);
       } else {
         setSaleRows([]);
-        const r = await api.jobCards.list(jcQ, '', 1, 20);
+        const r = await api.jobCards.list(q, '', 1, 30, lid);
         setJcRows(r.items.filter((j) => j.status !== 'converted' && j.status !== 'delivered'));
       }
     } catch (e) {
       toast(e instanceof Error ? e.message : 'Search failed', 'error');
+    } finally {
+      setSearching(false);
+    }
+  }
+
+  function handleOpenFindModal() {
+    setActiveActionId(null);
+    const book = bookingNo?.trim() || '';
+    const custName = partyName?.trim() || '';
+    const initialQuery = book || custName || '';
+    setJcOpen(true);
+    setJcQ(initialQuery);
+    if (initialQuery) {
+      const lid = !book && custName && ledgerId ? ledgerId : undefined;
+      void searchJobCards(initialQuery, lid);
+    } else {
+      setHasSearched(false);
+      setJcRows([]);
+      setSaleRows([]);
+    }
+  }
+
+  async function updateOrderStatus(jobCardId: string, newStatus: string) {
+    setUpdatingStatusId(jobCardId);
+    try {
+      const updated = await api.jobCards.updateStatus(jobCardId, newStatus);
+      setJcRows((prev) =>
+        prev.map((row) => (row._id === jobCardId ? { ...row, status: updated.status } : row)),
+      );
+      toast(
+        `Order #${updated.no ?? updated.ref} status set to ${newStatus.replace('_', ' ')}`,
+        'success',
+      );
+    } catch (e) {
+      toast(e instanceof Error ? e.message : 'Failed to update status', 'error');
+    } finally {
+      setUpdatingStatusId(null);
+      setActiveActionId(null);
     }
   }
 
@@ -805,7 +855,7 @@ export function SaleForm() {
                       }}
                       onPick={pickLedger}
                       onCreate={canAddLedger ? () => setLedgerOpen(true) : undefined}
-                      placeholder="Start typing a customer's name…"
+                      placeholder="Start typing name, phone, book #, or order #…"
                       className="font-semibold"
                     />
                   </div>
@@ -855,17 +905,19 @@ export function SaleForm() {
                   <TextInput
                     value={bookingNo}
                     onChange={(e) => setBookingNo(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        handleOpenFindModal();
+                      }
+                    }}
                     placeholder="Book No"
                     className="bg-ink-100 font-mono text-ink-600"
                   />
                   <button
                     type="button"
                     className="btn-soft shrink-0 !py-1.5"
-                    onClick={() => {
-                      setJcOpen(true);
-                      setJcQ('');
-                      setJcRows([]);
-                    }}
+                    onClick={handleOpenFindModal}
                     title="Find earlier order"
                   >
                     Find
@@ -1616,14 +1668,17 @@ export function SaleForm() {
       {/* Find Order / Invoice Modal */}
       <Modal
         open={jcOpen}
-        onClose={() => setJcOpen(false)}
+        onClose={() => {
+          setJcOpen(false);
+          setActiveActionId(null);
+        }}
         title={isReturn ? 'Find Sales Invoice or Stitching Order' : 'Find a stitching order'}
         sub={
           isReturn
             ? 'Select a previous invoice or order to create a return'
             : 'Open or ready orders that have not been billed yet'
         }
-        wide
+        size="xl"
         footer={
           <button className="btn-soft" onClick={() => setJcOpen(false)}>
             Cancel
@@ -1635,17 +1690,34 @@ export function SaleForm() {
             autoFocus
             placeholder={
               isReturn
-                ? 'e.g. Bill No (e.g. 101), Order Ref, or customer name'
-                : 'e.g. Ref-13051 or customer name'
+                ? 'Search by customer name, phone, book #, order #, or ref…'
+                : 'Search by customer name, phone, book #, order #, or ref…'
             }
             value={jcQ}
             onChange={(e) => setJcQ(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && void searchJobCards()}
           />
-          <button className="btn-primary shrink-0" onClick={searchJobCards}>
-            Search
+          <button
+            className="btn-primary shrink-0"
+            onClick={() => void searchJobCards()}
+            disabled={searching}
+          >
+            {searching ? 'Searching…' : 'Search'}
           </button>
         </div>
+
+        {searching && (
+          <div className="py-8 text-center text-xs text-ink-500 flex items-center justify-center gap-2">
+            <span className="h-4 w-4 animate-spin rounded-full border-2 border-brand-600 border-t-transparent" />
+            <span>Finding orders…</span>
+          </div>
+        )}
+
+        {!searching && hasSearched && jcRows.length === 0 && saleRows.length === 0 && (
+          <div className="rounded-xl border border-dashed border-ink-200 bg-ink-50/50 p-8 text-center text-xs text-ink-500">
+            No active stitching orders found{jcQ ? ` for "${jcQ}"` : ''}.
+          </div>
+        )}
 
         {/* Sales Invoices Table (when isReturn and sales exist) */}
         {isReturn && saleRows.length > 0 && (
@@ -1687,26 +1759,8 @@ export function SaleForm() {
                       <td className="td text-right font-bold tabular-nums text-brass-600">
                         {fmt(s.balance)}
                       </td>
-                      <td className="td text-center">
-                        {s.isReturn ? (
-                          <span className="inline-flex items-center gap-1 rounded-full bg-rose-100 px-2 py-0.5 text-[10px] font-bold text-rose-700 border border-rose-200">
-                            ↩ Return
-                          </span>
-                        ) : s.orderStatus ? (
-                          <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-bold ${
-                            s.orderStatus === 'delivered'
-                              ? 'bg-emerald-100 text-emerald-800 border border-emerald-200'
-                              : s.orderStatus === 'partially_ready'
-                              ? 'bg-amber-100 text-amber-800 border border-amber-200'
-                              : 'bg-ink-100 text-ink-700'
-                          }`}>
-                            {s.orderStatus === 'partially_ready' ? 'Partially Ready' : s.orderStatus.replace('_', ' ')}
-                          </span>
-                        ) : (
-                          <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-bold text-emerald-700 border border-emerald-200">
-                            ✓ Delivered
-                          </span>
-                        )}
+                      <td className="td text-center whitespace-nowrap">
+                        <StatusBadge status={s.isReturn ? 'return' : (s.orderStatus || 'delivered')} />
                       </td>
                     </tr>
                   ))}
@@ -1718,52 +1772,144 @@ export function SaleForm() {
 
         {/* Stitching Orders Table */}
         {jcRows.length > 0 && (
-          <div>
+          <div onClick={() => setActiveActionId(null)}>
             {isReturn && (
               <h3 className="mb-2 text-xs font-bold uppercase tracking-wider text-ink-500">
                 Stitching Orders
               </h3>
             )}
-            <div className="overflow-x-auto rounded-xl border border-ink-200">
-              <table className="w-full">
+            <div className="overflow-x-auto rounded-xl border border-ink-200 pb-20">
+              <table className="w-full text-xs">
                 <thead>
-                  <tr className="border-b border-ink-100 bg-ink-50/60 text-xs">
-                    <th className="th">Inv No</th>
-                    <th className="th">Book No</th>
-                    <th className="th">Ref</th>
-                    <th className="th">Customer</th>
-                    <th className="th text-right">Net</th>
-                    <th className="th text-right">Advance</th>
-                    <th className="th text-center">Status</th>
+                  <tr className="border-b border-ink-200 bg-ink-50/70 text-[11px] font-bold text-ink-600 uppercase tracking-wider">
+                    <th className="px-2.5 py-2 text-left w-[85px]">Inv No</th>
+                    <th className="px-2 py-2 text-center w-[65px]">Book No</th>
+                    <th className="px-2 py-2 text-left w-[90px]">Ref</th>
+                    <th className="px-2.5 py-2 text-left">Customer</th>
+                    <th className="px-2.5 py-2 text-right w-[85px]">Net</th>
+                    <th className="px-2.5 py-2 text-right w-[80px]">Advance</th>
+                    <th className="px-2 py-2 text-center w-[130px]">Status</th>
+                    <th className="px-2 py-2 text-center w-[95px]">Action</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-ink-50 text-xs">
+                <tbody className="divide-y divide-ink-100 text-xs">
                   {jcRows.map((j) => (
                     <tr
                       key={j._id}
-                      className="cursor-pointer hover:bg-brand-50 transition-colors"
+                      className="cursor-pointer hover:bg-brand-50/60 transition-colors"
                       onClick={() => convertFrom(j)}
                     >
-                      <td className="td font-mono font-bold text-brand-700">
+                      <td className="px-2.5 py-2 font-mono font-bold text-brand-700">
                         {j.invoiceNo ? j.invoiceNo.replace(/^B-?/i, '') : '—'}
                       </td>
-                      <td className="td font-mono font-bold text-ink-700">
+                      <td className="px-2 py-2 text-center font-mono font-bold text-ink-700">
                         {j.bookNo ?? j.no}
                       </td>
-                      <td className="td font-mono text-ink-600">{j.ref}</td>
-                      <td className="td font-semibold">{j.partyName || '—'}</td>
-                      <td className="td text-right tabular-nums">{fmt(j.netAmount)}</td>
-                      <td className="td text-right tabular-nums text-emerald-600">{fmt(j.advance)}</td>
-                      <td className="td text-center">
-                        <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide ${
-                          j.status === 'delivered'
-                            ? 'bg-emerald-100 text-emerald-900 border border-emerald-300'
-                            : j.status === 'partially_ready'
-                            ? 'bg-amber-100 text-amber-900 border border-amber-300'
-                            : 'bg-brand-100 text-brand-800'
-                        }`}>
-                          {j.status === 'partially_ready' ? 'Partially Ready' : j.status?.replace('_', ' ')}
-                        </span>
+                      <td className="px-2 py-2 font-mono text-ink-600">{j.ref}</td>
+                      <td className="px-2.5 py-2 font-semibold text-ink-900">{j.partyName || '—'}</td>
+                      <td className="px-2.5 py-2 text-right tabular-nums font-semibold">{fmt(j.netAmount)}</td>
+                      <td className="px-2.5 py-2 text-right tabular-nums text-emerald-600 font-semibold">{fmt(j.advance)}</td>
+                      <td className="px-2 py-2 text-center whitespace-nowrap">
+                        <StatusBadge status={j.status} />
+                      </td>
+                      <td className="px-2 py-2 text-center" onClick={(e) => e.stopPropagation()}>
+                        <div className="relative inline-block text-left">
+                          <button
+                            type="button"
+                            className="inline-flex items-center gap-1 rounded-lg border border-ink-200 bg-white px-2.5 py-1 text-[11px] font-bold text-ink-700 shadow-xs transition hover:border-brand-400 hover:bg-brand-50 hover:text-brand-700 disabled:opacity-50"
+                            onClick={() => setActiveActionId(activeActionId === j._id ? null : j._id)}
+                            disabled={updatingStatusId === j._id}
+                          >
+                            <span>{updatingStatusId === j._id ? '…' : 'Action'}</span>
+                            <span className="text-[9px] text-ink-500">▾</span>
+                          </button>
+
+                          {activeActionId === j._id && (
+                            <div className="absolute right-0 z-50 mt-1 w-44 rounded-xl border border-ink-200 bg-white p-1 text-left shadow-lg ring-1 ring-black/5 animate-in fade-in zoom-in-95 duration-100">
+                              <button
+                                type="button"
+                                className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-xs font-semibold text-emerald-700 transition hover:bg-emerald-50"
+                                onClick={() => {
+                                  setActiveActionId(null);
+                                  void convertFrom(j);
+                                }}
+                              >
+                                <span className="text-sm">⚡</span>
+                                <span>Select / Invoice</span>
+                              </button>
+
+                              <button
+                                type="button"
+                                className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-xs font-semibold text-brand-700 transition hover:bg-brand-50"
+                                onClick={() => {
+                                  setActiveActionId(null);
+                                  setPartyName(j.partyName || '');
+                                  setPhone(j.phone || '');
+                                  if (j.ledgerId) setLedgerId(String(j.ledgerId));
+                                  if (j.bookNo != null) setBookingNo(String(j.bookNo));
+                                  setJcOpen(false);
+                                  toast(`Customer "${j.partyName}" selected`, 'success');
+                                }}
+                              >
+                                <span className="text-sm">👤</span>
+                                <span>Pick Customer Only</span>
+                              </button>
+
+                              <div className="my-1 border-t border-ink-100" />
+                              <div className="px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-ink-400">
+                                Change Status
+                              </div>
+
+                              <button
+                                type="button"
+                                className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-xs font-medium text-amber-700 transition hover:bg-amber-50"
+                                onClick={() => void updateOrderStatus(j._id, 'partially_ready')}
+                              >
+                                <span>🟡</span>
+                                <span>Partially Ready</span>
+                              </button>
+
+                              <button
+                                type="button"
+                                className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-xs font-medium text-emerald-700 transition hover:bg-emerald-50"
+                                onClick={() => void updateOrderStatus(j._id, 'ready')}
+                              >
+                                <span>✓</span>
+                                <span>Complete (Ready)</span>
+                              </button>
+
+                              <button
+                                type="button"
+                                className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-xs font-medium text-brand-700 transition hover:bg-brand-50"
+                                onClick={() => void updateOrderStatus(j._id, 'open')}
+                              >
+                                <span>⏳</span>
+                                <span>Pending (Open)</span>
+                              </button>
+
+                              <button
+                                type="button"
+                                className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-xs font-medium text-ink-700 transition hover:bg-ink-100"
+                                onClick={() => void updateOrderStatus(j._id, 'delivered')}
+                              >
+                                <span>🚚</span>
+                                <span>Delivered</span>
+                              </button>
+
+                              <div className="my-1 border-t border-ink-100" />
+                              <a
+                                href={`/job-cards/${j._id}`}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-xs font-medium text-ink-600 transition hover:bg-ink-50"
+                                onClick={() => setActiveActionId(null)}
+                              >
+                                <span className="text-sm">✏️</span>
+                                <span>View / Edit Order ↗</span>
+                              </a>
+                            </div>
+                          )}
+                        </div>
                       </td>
                     </tr>
                   ))}

@@ -10,6 +10,8 @@ export function Modal({
   children,
   footer,
   wide,
+  size,
+  className = '',
 }: {
   open: boolean;
   onClose: () => void;
@@ -18,6 +20,8 @@ export function Modal({
   children: React.ReactNode;
   footer?: React.ReactNode;
   wide?: boolean;
+  size?: 'sm' | 'md' | 'lg' | 'xl' | '2xl';
+  className?: string;
 }) {
   useEffect(() => {
     if (!open) return;
@@ -30,6 +34,17 @@ export function Modal({
 
   if (!open) return null;
 
+  const widthClass =
+    size === '2xl'
+      ? 'max-w-5xl'
+      : size === 'xl'
+      ? 'max-w-4xl'
+      : size === 'sm'
+      ? 'max-w-md'
+      : wide || size === 'lg'
+      ? 'max-w-3xl'
+      : 'max-w-lg';
+
   return (
     <div className="no-print fixed inset-0 z-[90] flex items-end justify-center p-0 sm:items-center sm:p-4">
       <div
@@ -37,7 +52,7 @@ export function Modal({
         onClick={onClose}
       />
       <div
-        className={`relative w-full ${wide ? 'max-w-3xl' : 'max-w-lg'} card max-h-[92vh] overflow-hidden !rounded-b-none sm:!rounded-b-xl`}
+        className={`relative w-full ${widthClass} ${className} card max-h-[92vh] overflow-hidden !rounded-b-none sm:!rounded-b-xl`}
       >
         <div className="flex items-start justify-between border-b border-ink-100 px-5 py-4 sm:px-6">
           <div>

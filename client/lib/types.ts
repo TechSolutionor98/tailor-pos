@@ -36,6 +36,10 @@ export interface Ledger {
   createdAt?: string;
   /** What they owe right now. Supplied by the list and by /ledgers/:id/due. */
   due?: number;
+  /** Most recent order number, if available */
+  latestOrderNo?: number;
+  /** Most recent book number, if available */
+  latestBookNo?: number;
 }
 
 /** An address as it should read on a document, from the parts that are set. */

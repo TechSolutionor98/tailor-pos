@@ -101,6 +101,8 @@ const post = <T,>(path: string, body?: unknown) =>
   http<T>(path, { method: 'POST', body: JSON.stringify(body ?? {}) });
 const put = <T,>(path: string, body?: unknown) =>
   http<T>(path, { method: 'PUT', body: JSON.stringify(body ?? {}) });
+const patch = <T,>(path: string, body?: unknown) =>
+  http<T>(path, { method: 'PATCH', body: JSON.stringify(body ?? {}) });
 const del = <T,>(path: string) => http<T>(path, { method: 'DELETE' });
 
 export interface UserPayload {
@@ -184,9 +186,11 @@ export const api = {
   },
 
   jobCards: {
-    list: (q = '', status = '', page = 1, limit = 30) =>
+    list: (q = '', status = '', page = 1, limit = 30, ledgerId = '') =>
       get<Page<JobCard>>(
-        `/jobcards?q=${encodeURIComponent(q)}&status=${status}&page=${page}&limit=${limit}`,
+        `/jobcards?q=${encodeURIComponent(q)}&status=${status}&page=${page}&limit=${limit}${
+          ledgerId ? `&ledgerId=${encodeURIComponent(ledgerId)}` : ''
+        }`,
       ),
     next: () => get<{ no: number; ref: string; bookNo?: number }>('/jobcards/next'),
     adjacent: (no: number, dir: 'prev' | 'next') =>
@@ -199,6 +203,8 @@ export const api = {
     reopen: (id: string) => post<JobCard>(`/jobcards/${id}/reopen`),
     setPending: (id: string) => post<JobCard>(`/jobcards/${id}/pending`),
     complete: (id: string) => post<JobCard>(`/jobcards/${id}/complete`),
+    updateStatus: (id: string, status: string) =>
+      patch<JobCard>(`/jobcards/${id}/status`, { status }),
     convert: (id: string, body: unknown) =>
       post<{ jobCard: JobCard; sale: Sale }>(`/jobcards/${id}/convert`, body),
     convertBulk: (ids: string[], body: { salesman?: string; taxRate?: number } = {}) =>
@@ -208,11 +214,11 @@ export const api = {
   },
 
   sales: {
-    list: (q = '', page = 1, limit = 30, isReturn?: boolean) =>
+    list: (q = '', page = 1, limit = 30, isReturn?: boolean, ledgerId = '') =>
       get<Page<Sale>>(
         `/sales?q=${encodeURIComponent(q)}&page=${page}&limit=${limit}${
           isReturn === undefined ? '' : `&isReturn=${isReturn}`
-        }`,
+        }${ledgerId ? `&ledgerId=${encodeURIComponent(ledgerId)}` : ''}`,
       ),
     next: () => get<{ billNo: number }>('/sales/next'),
     get: (id: string) => get<Sale>(`/sales/${id}`),

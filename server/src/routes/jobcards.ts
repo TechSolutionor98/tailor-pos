@@ -99,18 +99,55 @@ jobCardRouter.use(requireAuth);
 
 const DEFAULT_TAX_RATE = 5;
 
-function searchFilter(q?: string) {
-  if (!q) return {};
-  const rx = new RegExp(q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
-  const or: Record<string, unknown>[] = [
-    { ref: rx },
-    { partyName: rx },
-    { phone: rx },
-    { invoiceNo: rx },
-  ];
-  const asNum = Number(q);
-  if (Number.isFinite(asNum) && q.trim() !== '') or.push({ no: asNum });
-  return { $or: or };
+function searchFilter(q?: string, ledgerId?: string) {
+  const trimmed = (q || '').trim();
+  const escaped = trimmed.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const rx = trimmed ? new RegExp(escaped, 'i') : null;
+
+  let queryOr: Record<string, unknown>[] | null = null;
+  if (trimmed && rx) {
+    const isShortNumber = /^\d{1,2}$/.test(trimmed);
+    queryOr = [
+      { ref: rx },
+      { partyName: rx },
+    ];
+    if (!isShortNumber) {
+      queryOr.push({ phone: rx }, { invoiceNo: rx });
+    }
+    const asNum = Number(trimmed);
+    if (Number.isFinite(asNum) && trimmed !== '') {
+      queryOr.push({ no: asNum }, { bookNo: asNum });
+    }
+    const digitMatches = trimmed.match(/\d+/g);
+    if (digitMatches) {
+      for (const d of digitMatches) {
+        const n = Number(d);
+        if (Number.isFinite(n)) {
+          queryOr.push({ no: n }, { bookNo: n });
+        }
+      }
+    }
+  }
+
+  if (ledgerId && Types.ObjectId.isValid(ledgerId)) {
+    const custOr: Record<string, unknown>[] = [
+      { ledgerId: new Types.ObjectId(ledgerId) },
+    ];
+    if (!queryOr) {
+      return { $or: custOr };
+    }
+    return {
+      $and: [
+        { $or: custOr },
+        { $or: queryOr },
+      ],
+    };
+  }
+
+  if (queryOr) {
+    return { $or: queryOr };
+  }
+  return {};
 }
 
 interface JobCardBody {
@@ -255,10 +292,10 @@ jobCardRouter.get(
   '/',
   requirePerm('jobcards.view'),
   asyncHandler(async (req, res) => {
-    const { q, status } = req.query as { q?: string; status?: string };
+    const { q, status, ledgerId } = req.query as { q?: string; status?: string; ledgerId?: string };
     const page = Math.max(num(req.query.page, 1), 1);
     const limit = Math.min(Math.max(num(req.query.limit, 30), 1), 200);
-    const filter: Record<string, unknown> = { ...searchFilter(q) };
+    const filter: Record<string, unknown> = { ...searchFilter(q, ledgerId) };
     // Drafts are no longer a thing the form can make. Older ones are still on
     // file, but they are not orders and have no business in this list.
     if (status && status !== 'draft') {
@@ -810,6 +847,66 @@ jobCardRouter.post(
       }`,
     });
     res.status(201).json(doc);
+  }),
+);
+
+// PATCH /jobcards/:id/status
+jobCardRouter.patch(
+  '/:id/status',
+  requirePerm('jobcards.edit'),
+  asyncHandler(async (req, res) => {
+    const { status } = req.body as { status: string };
+    const valid = ['open', 'partially_ready', 'ready', 'closed', 'delivered'];
+    if (!valid.includes(status)) {
+      throw new HttpError(400, `Invalid status. Allowed: ${valid.join(', ')}`);
+    }
+    const doc = await JobCard.findById(req.params.id);
+    if (!doc) throw new HttpError(404, 'Stitching order not found');
+    const before = snapshotJobCard(doc.toObject());
+
+    doc.status = status as any;
+    if (status === 'closed' || status === 'ready') {
+      doc.closedAt = new Date();
+      if (doc.items && doc.items.length > 0) {
+        doc.items.forEach((item: any) => {
+          item.completed = true;
+        });
+      }
+    } else if (status === 'open') {
+      doc.closedAt = undefined;
+      if (doc.items && doc.items.length > 0) {
+        doc.items.forEach((item: any) => {
+          if (!item.invoiced) {
+            item.completed = false;
+          }
+        });
+      }
+    } else if (status === 'delivered') {
+      doc.closedAt = new Date();
+      if (doc.items && doc.items.length > 0) {
+        doc.items.forEach((item: any) => {
+          item.completed = true;
+          item.invoiced = true;
+        });
+      }
+    } else if (status === 'partially_ready') {
+      doc.closedAt = undefined;
+      if (doc.items && doc.items.length > 0) {
+        const hasCompleted = doc.items.some((i: any) => i.completed);
+        if (!hasCompleted) {
+          doc.items[0].completed = true;
+        }
+      }
+    }
+
+    await doc.save();
+    await recordAudit(req, {
+      action: 'update',
+      doc,
+      changes: diffSnapshots(before, snapshotJobCard(doc.toObject())),
+      summary: `Order #${doc.no ?? doc.ref} status changed to ${status}`,
+    });
+    res.json(doc);
   }),
 );
 

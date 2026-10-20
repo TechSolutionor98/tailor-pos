@@ -19,7 +19,7 @@ export function LedgerSearchInput({
   onChange,
   onPick,
   onCreate,
-  placeholder = 'Search customers…',
+  placeholder = 'Search by name, phone, book #, or order #…',
   disabled,
   autoFocus,
   className = '',
@@ -119,7 +119,7 @@ export function LedgerSearchInput({
         anchorRef={wrapRef}
         panelRef={panelRef}
         open={open && (rows.length > 0 || empty)}
-        width={320}
+        width={360}
       >
         <>
           {rows.map((l) => (
@@ -130,10 +130,28 @@ export function LedgerSearchInput({
                 onPick(l);
                 setOpen(false);
               }}
-              className="flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-[13px] hover:bg-brand-50"
+              className="flex w-full items-center justify-between gap-3 px-3 py-2 text-left text-[13px] hover:bg-brand-50 transition"
             >
-              <span className="font-semibold text-ink-800">{l.name}</span>
-              <span className="font-mono text-xs text-ink-500">{l.phone || '—'}</span>
+              <div className="flex flex-col min-w-0">
+                <span className="font-semibold text-ink-900 truncate">{l.name}</span>
+                {(l.latestBookNo != null || l.latestOrderNo != null) && (
+                  <span className="mt-0.5 flex items-center gap-1.5 text-[10.5px] font-mono text-ink-500">
+                    {l.latestBookNo != null && (
+                      <span className="rounded bg-brand-50 px-1 py-0.2 text-brand-700 font-semibold border border-brand-200/60">
+                        Book #{l.latestBookNo}
+                      </span>
+                    )}
+                    {l.latestOrderNo != null && (
+                      <span className="rounded bg-ink-100 px-1 py-0.2 text-ink-700 font-semibold">
+                        Order #{l.latestOrderNo}
+                      </span>
+                    )}
+                  </span>
+                )}
+              </div>
+              <span className="font-mono text-xs text-ink-600 shrink-0 font-medium">
+                {l.phone || '—'}
+              </span>
             </button>
           ))}
           {/* A name nobody is filed under is usually a new walk-in, not a typo,

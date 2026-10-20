@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import { Types } from 'mongoose';
 import { Ledger } from '../models/Ledger';
 import { JobCard } from '../models/JobCard';
 import { Sale } from '../models/Sale';
@@ -12,10 +13,102 @@ export const ledgerRouter = Router();
 // Every endpoint below requires a signed-in user.
 ledgerRouter.use(requireAuth);
 
-function searchFilter(q?: string) {
-  if (!q) return {};
-  const rx = new RegExp(q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
-  return { $or: [{ name: rx }, { phone: rx }] };
+async function buildLedgerSearchFilter(q?: string): Promise<{ filter: Record<string, unknown>; matchedLedgerIds: Set<string> }> {
+  if (!q || !q.trim()) return { filter: {}, matchedLedgerIds: new Set() };
+  const trimmed = q.trim();
+  const escaped = trimmed.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const rx = new RegExp(escaped, 'i');
+
+  const isShortNumber = /^\d{1,2}$/.test(trimmed);
+
+  const ledgerOr: Record<string, unknown>[] = [
+    { name: rx },
+    { contactId: rx },
+    { businessName: rx },
+  ];
+
+  if (!isShortNumber) {
+    ledgerOr.push(
+      { phone: rx },
+      { altPhone: rx },
+      { landline: rx },
+    );
+  }
+
+  // Extract any digits for book number, order number, or invoice number searches
+  const digitMatches = trimmed.match(/\d+/g);
+  const numbers = digitMatches ? digitMatches.map(Number).filter(Number.isFinite) : [];
+
+  const jcOr: Record<string, unknown>[] = [
+    { ref: rx },
+    { partyName: rx },
+  ];
+  if (!isShortNumber) {
+    jcOr.push({ phone: rx }, { invoiceNo: rx });
+  }
+  if (numbers.length > 0) {
+    for (const n of numbers) {
+      jcOr.push({ no: n }, { bookNo: n });
+    }
+  }
+
+  const saleOr: Record<string, unknown>[] = [
+    { refNo: rx },
+    { jobCardRef: rx },
+    { partyName: rx },
+  ];
+  if (!isShortNumber) {
+    saleOr.push({ phone: rx });
+  }
+  if (numbers.length > 0) {
+    for (const n of numbers) {
+      saleOr.push({ billNo: n }, { bookingNo: String(n) });
+    }
+  }
+
+  const matchedLedgerIds = new Set<string>();
+  const matchedPartyNames = new Set<string>();
+
+  try {
+    const [matchedJcs, matchedSales] = await Promise.all([
+      JobCard.find({ $or: jcOr })
+        .select('ledgerId partyName phone no bookNo')
+        .sort({ _id: -1 })
+        .limit(30)
+        .lean(),
+      Sale.find({ $or: saleOr })
+        .select('ledgerId partyName phone billNo bookingNo')
+        .sort({ _id: -1 })
+        .limit(30)
+        .lean(),
+    ]);
+
+    for (const j of matchedJcs) {
+      if (j.ledgerId) matchedLedgerIds.add(String(j.ledgerId));
+      if (j.partyName && j.partyName.trim()) matchedPartyNames.add(j.partyName.trim());
+    }
+    for (const s of matchedSales) {
+      if (s.ledgerId) matchedLedgerIds.add(String(s.ledgerId));
+      if (s.partyName && s.partyName.trim()) matchedPartyNames.add(s.partyName.trim());
+    }
+
+    if (matchedLedgerIds.size > 0) {
+      const validIds = Array.from(matchedLedgerIds)
+        .filter((id) => Types.ObjectId.isValid(id))
+        .map((id) => new Types.ObjectId(id));
+      if (validIds.length > 0) {
+        ledgerOr.push({ _id: { $in: validIds } });
+      }
+    }
+
+    if (matchedPartyNames.size > 0) {
+      ledgerOr.push({ name: { $in: Array.from(matchedPartyNames) } });
+    }
+  } catch (err) {
+    console.error('Error in buildLedgerSearchFilter:', err);
+  }
+
+  return { filter: { $or: ledgerOr }, matchedLedgerIds };
 }
 
 // GET /ledgers?q=&type=&page=&limit=
@@ -26,13 +119,24 @@ ledgerRouter.get(
     const { q, type } = req.query as { q?: string; type?: string };
     const page = Math.max(num(req.query.page, 1), 1);
     const limit = Math.min(Math.max(num(req.query.limit, 50), 1), 500);
-    const filter: Record<string, unknown> = { ...searchFilter(q) };
+    const { filter, matchedLedgerIds } = await buildLedgerSearchFilter(q);
     if (type) filter.type = type;
     const [items, total] = await Promise.all([
       Ledger.find(filter).sort({ name: 1 }).skip((page - 1) * limit).limit(limit).lean(),
       Ledger.countDocuments(filter),
     ]);
-    res.json({ items: await withDue(items as LedgerRow[]), total, page, limit });
+
+    let sortedItems = items;
+    if (matchedLedgerIds.size > 0) {
+      sortedItems = [...items].sort((a, b) => {
+        const aMatched = matchedLedgerIds.has(String(a._id)) ? 1 : 0;
+        const bMatched = matchedLedgerIds.has(String(b._id)) ? 1 : 0;
+        if (aMatched !== bMatched) return bMatched - aMatched;
+        return a.name.localeCompare(b.name);
+      });
+    }
+
+    res.json({ items: await withDue(sortedItems as LedgerRow[]), total, page, limit });
   }),
 );
 
@@ -42,18 +146,16 @@ interface LedgerRow {
 }
 
 /**
- * Attach what each party currently owes to a page of ledgers.
- *
- * Two grouped queries for the whole page rather than one pair per row: a
- * hundred customers on screen would otherwise be two hundred round trips.
- * What counts towards the figure is the same as the single-party endpoint
- * below — see it for why converted orders and returns are treated as they
- * are.
+ * Attach what each party currently owes and their latest bookNo/orderNo to a page of ledgers.
  */
-async function withDue<T extends LedgerRow>(rows: T[]): Promise<(T & { due: number })[]> {
+async function withDue<T extends LedgerRow>(
+  rows: T[],
+): Promise<(T & { due: number; latestOrderNo?: number; latestBookNo?: number })[]> {
   if (!rows.length) return [];
   const ids = rows.map((r) => String(r._id));
-  const [orders, sales] = await Promise.all([
+  const validIds = ids.filter((id) => Types.ObjectId.isValid(id)).map((id) => new Types.ObjectId(id));
+
+  const [orders, sales, recentOrders] = await Promise.all([
     JobCard.aggregate([
       { $match: { ledgerId: { $in: ids }, status: { $in: ['open', 'partially_ready', 'ready', 'closed'] } } },
       { $group: { _id: '$ledgerId', due: { $sum: '$balance' } } },
@@ -67,16 +169,38 @@ async function withDue<T extends LedgerRow>(rows: T[]): Promise<(T & { due: numb
         },
       },
     ]),
+    JobCard.aggregate([
+      { $match: { ledgerId: { $in: validIds } } },
+      { $sort: { _id: -1 } },
+      {
+        $group: {
+          _id: '$ledgerId',
+          latestBookNo: { $first: '$bookNo' },
+          latestOrderNo: { $first: '$no' },
+        },
+      },
+    ]),
   ]);
   const byId = new Map<string, number>();
   for (const g of [...orders, ...sales]) {
     const key = String(g._id);
     byId.set(key, num(byId.get(key)) + num(g.due));
   }
-  return rows.map((r) => ({
-    ...r,
-    due: r2(num(r.openingBalance) + num(byId.get(String(r._id)))),
-  }));
+  const metaById = new Map<string, { latestBookNo?: number; latestOrderNo?: number }>();
+  for (const r of recentOrders) {
+    metaById.set(String(r._id), { latestBookNo: r.latestBookNo, latestOrderNo: r.latestOrderNo });
+  }
+
+  return rows.map((r) => {
+    const key = String(r._id);
+    const meta = metaById.get(key);
+    return {
+      ...r,
+      due: r2(num(r.openingBalance) + num(byId.get(key))),
+      latestBookNo: meta?.latestBookNo,
+      latestOrderNo: meta?.latestOrderNo,
+    };
+  });
 }
 
 // POST /ledgers

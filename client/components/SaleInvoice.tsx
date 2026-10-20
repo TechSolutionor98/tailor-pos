@@ -49,16 +49,45 @@ function DetailRow({
 }
 
 /** One figure in the totals block, laid out like the detail rows above it. */
-function TotalRow({ en, ar, value }: { en: string; ar: string; value: string }) {
+function TotalRow({
+  en,
+  ar,
+  value,
+  highlightRed = false,
+}: {
+  en: string;
+  ar: string;
+  value: string;
+  highlightRed?: boolean;
+}) {
   return (
-    <tr>
-      <td className="whitespace-nowrap py-[2px] pr-3 align-top text-[7pt] font-bold uppercase text-neutral-700">
+    <tr className={highlightRed ? 'border-t border-red-200 bg-red-50/50 print:[print-color-adjust:exact]' : ''}>
+      <td
+        className={`whitespace-nowrap py-[3px] pr-3 align-middle uppercase print:[print-color-adjust:exact] ${
+          highlightRed
+            ? 'text-[8.5pt] font-black text-red-600'
+            : 'text-[7pt] font-bold text-neutral-700'
+        }`}
+      >
         {en}:
       </td>
-      <td className="w-full whitespace-nowrap py-[2px] pr-3 align-top text-[7.5pt] font-bold tabular-nums">
+      <td
+        className={`w-full whitespace-nowrap py-[3px] pr-3 align-middle tabular-nums print:[print-color-adjust:exact] ${
+          highlightRed
+            ? 'text-[10pt] font-black text-red-600'
+            : 'text-[7.5pt] font-bold text-neutral-900'
+        }`}
+      >
         {value}
       </td>
-      <td className="whitespace-nowrap py-[2px] align-top text-[7pt] text-neutral-600" dir="rtl">
+      <td
+        className={`whitespace-nowrap py-[3px] align-middle print:[print-color-adjust:exact] ${
+          highlightRed
+            ? 'text-[8.5pt] font-bold text-red-600'
+            : 'text-[7pt] text-neutral-600'
+        }`}
+        dir="rtl"
+      >
         {ar}
       </td>
     </tr>
@@ -456,7 +485,12 @@ export function SaleInvoice({
                 value={`AED ${fmt(bankPaid)}`}
               />
             )}
-            <TotalRow en="Due Amount" ar="المبلغ المستحق" value={`AED ${fmt(sale.balance || 0)}`} />
+            <TotalRow
+              en="Due Amount"
+              ar="المبلغ المستحق"
+              value={`AED ${fmt(sale.balance || 0)}`}
+              highlightRed
+            />
             {sale.changeReturn && sale.changeReturn > 0 ? (
               <TotalRow
                 en="Change Return"

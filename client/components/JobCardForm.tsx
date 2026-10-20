@@ -264,6 +264,10 @@ export function JobCardForm({ initial, mode }: { initial?: JobCard | null; mode:
   const [findOpen, setFindOpen] = useState(false);
   const [findQ, setFindQ] = useState('');
   const [findRows, setFindRows] = useState<JobCard[]>([]);
+  const [findSearching, setFindSearching] = useState(false);
+  const [hasFindSearched, setHasFindSearched] = useState(false);
+  const [updatingStatusId, setUpdatingStatusId] = useState<string | null>(null);
+  const [activeActionId, setActiveActionId] = useState<string | null>(null);
 
   const docId = mode === 'new' ? undefined : initial?._id;
   const isCompleted =
@@ -1048,12 +1052,50 @@ export function JobCardForm({ initial, mode }: { initial?: JobCard | null; mode:
     }
   }
 
-  async function searchFind() {
+  async function searchFind(queryOverride?: string, ledgerIdOverride?: string) {
+    const q = queryOverride !== undefined ? queryOverride : findQ;
+    const lid = ledgerIdOverride !== undefined ? ledgerIdOverride : '';
+    setFindSearching(true);
+    setHasFindSearched(true);
     try {
-      const r = await api.jobCards.list(findQ, '', 1, 10);
+      const r = await api.jobCards.list(q, '', 1, 20, lid);
       setFindRows(r.items);
     } catch (e) {
       toast(e instanceof Error ? e.message : 'Search failed', 'error');
+    } finally {
+      setFindSearching(false);
+    }
+  }
+
+  function handleOpenFindStitching() {
+    setActiveActionId(null);
+    const custName = partyName?.trim() || '';
+    setFindOpen(true);
+    setFindQ(custName);
+    if (custName) {
+      void searchFind(custName, ledgerId || undefined);
+    } else {
+      setHasFindSearched(false);
+      setFindRows([]);
+    }
+  }
+
+  async function updateOrderStatus(jobCardId: string, newStatus: string) {
+    setUpdatingStatusId(jobCardId);
+    try {
+      const updated = await api.jobCards.updateStatus(jobCardId, newStatus);
+      setFindRows((prev) =>
+        prev.map((row) => (row._id === jobCardId ? { ...row, status: updated.status } : row)),
+      );
+      toast(
+        `Order #${updated.no ?? updated.ref} status set to ${newStatus.replace('_', ' ')}`,
+        'success',
+      );
+    } catch (e) {
+      toast(e instanceof Error ? e.message : 'Failed to update status', 'error');
+    } finally {
+      setUpdatingStatusId(null);
+      setActiveActionId(null);
     }
   }
 
@@ -1247,7 +1289,7 @@ export function JobCardForm({ initial, mode }: { initial?: JobCard | null; mode:
               <Field label="&nbsp;" className="sm:col-span-2">
                 <button
                   className="btn-soft w-full disabled:cursor-not-allowed disabled:opacity-40"
-                  onClick={() => { setFindOpen(true); setFindQ(''); setFindRows([]); }}
+                  onClick={handleOpenFindStitching}
                   title="Find an earlier order"
                   disabled={readOnly}
                 >
@@ -1903,10 +1945,13 @@ export function JobCardForm({ initial, mode }: { initial?: JobCard | null; mode:
 
       <Modal
         open={findOpen}
-        onClose={() => setFindOpen(false)}
+        onClose={() => {
+          setFindOpen(false);
+          setActiveActionId(null);
+        }}
         title="Find Stitching"
         sub="Search by number, ref or customer"
-        wide
+        size="xl"
         footer={
           <button className="btn-soft" onClick={() => setFindOpen(false)}>
             Cancel
@@ -1921,39 +1966,145 @@ export function JobCardForm({ initial, mode }: { initial?: JobCard | null; mode:
             onChange={(e) => setFindQ(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && void searchFind()}
           />
-          <button className="btn-primary shrink-0" onClick={searchFind}>
-            Search
+          <button
+            className="btn-primary shrink-0"
+            onClick={() => void searchFind()}
+            disabled={findSearching}
+          >
+            {findSearching ? 'Searching…' : 'Search'}
           </button>
         </div>
+
+        {findSearching && (
+          <div className="py-8 text-center text-xs text-ink-500 flex items-center justify-center gap-2">
+            <span className="h-4 w-4 animate-spin rounded-full border-2 border-brand-600 border-t-transparent" />
+            <span>Finding orders…</span>
+          </div>
+        )}
+
+        {!findSearching && hasFindSearched && findRows.length === 0 && (
+          <div className="rounded-xl border border-dashed border-ink-200 bg-ink-50/50 p-8 text-center text-xs text-ink-500">
+            No stitching orders found{findQ ? ` for "${findQ}"` : ''}.
+          </div>
+        )}
         {findRows.length > 0 && (
-          <table className="w-full">
-            <thead>
-              <tr className="border-b border-ink-100">
-                <th className="th">Invoice No</th>
-                <th className="th">Ref</th>
-                <th className="th">Customer</th>
-                <th className="th text-right">Net</th>
-                <th className="th">Status</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-ink-50">
-              {findRows.map((j) => (
-                <tr
-                  key={j._id}
-                  className="cursor-pointer hover:bg-brand-50"
-                  onClick={() => router.push(`/job-cards/${j._id}`)}
-                >
-                  <td className="td font-bold text-brand-700">{orderNo(j)}</td>
-                  <td className="td font-mono text-xs">{j.ref}</td>
-                  <td className="td">{j.partyName || '—'}</td>
-                  <td className="td text-right tabular-nums">{fmt(j.netAmount)}</td>
-                  <td className="td">
-                    <StatusBadge status={j.status} />
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          <div onClick={() => setActiveActionId(null)}>
+            <div className="overflow-x-auto rounded-xl border border-ink-200 pb-20">
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="border-b border-ink-200 bg-ink-50/70 text-[11px] font-bold text-ink-600 uppercase tracking-wider">
+                    <th className="px-2.5 py-2 text-left w-[85px]">Invoice No</th>
+                    <th className="px-2 py-2 text-center w-[65px]">Book No</th>
+                    <th className="px-2 py-2 text-left w-[90px]">Ref</th>
+                    <th className="px-2.5 py-2 text-left">Customer</th>
+                    <th className="px-2.5 py-2 text-right w-[85px]">Net</th>
+                    <th className="px-2.5 py-2 text-center w-[110px]">Status</th>
+                    <th className="px-2 py-2 text-center w-[95px]">Action</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-ink-100 text-xs">
+                  {findRows.map((j) => (
+                    <tr
+                      key={j._id}
+                      className="cursor-pointer hover:bg-brand-50/60 transition-colors"
+                      onClick={() => router.push(`/job-cards/${j._id}`)}
+                    >
+                      <td className="px-2.5 py-2 font-mono font-bold text-brand-700">{orderNo(j)}</td>
+                      <td className="px-2 py-2 text-center font-mono font-bold text-ink-700">{j.bookNo ?? j.no}</td>
+                      <td className="px-2 py-2 font-mono text-ink-600">{j.ref}</td>
+                      <td className="px-2.5 py-2 font-semibold text-ink-900">{j.partyName || '—'}</td>
+                      <td className="px-2.5 py-2 text-right tabular-nums font-semibold">{fmt(j.netAmount)}</td>
+                      <td className="px-2 py-2 text-center whitespace-nowrap">
+                        <StatusBadge status={j.status} />
+                      </td>
+                      <td className="px-2 py-2 text-center" onClick={(e) => e.stopPropagation()}>
+                        <div className="relative inline-block text-left">
+                          <button
+                            type="button"
+                            className="inline-flex items-center gap-1 rounded-lg border border-ink-200 bg-white px-2.5 py-1 text-[11px] font-bold text-ink-700 shadow-xs transition hover:border-brand-400 hover:bg-brand-50 hover:text-brand-700 disabled:opacity-50"
+                            onClick={() => setActiveActionId(activeActionId === j._id ? null : j._id)}
+                            disabled={updatingStatusId === j._id}
+                          >
+                            <span>{updatingStatusId === j._id ? '…' : 'Action'}</span>
+                            <span className="text-[9px] text-ink-500">▾</span>
+                          </button>
+
+                          {activeActionId === j._id && (
+                            <div className="absolute right-0 z-50 mt-1 w-44 rounded-xl border border-ink-200 bg-white p-1 text-left shadow-lg ring-1 ring-black/5 animate-in fade-in zoom-in-95 duration-100">
+                              <button
+                                type="button"
+                                className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-xs font-semibold text-brand-700 transition hover:bg-brand-50"
+                                onClick={() => {
+                                  setActiveActionId(null);
+                                  router.push(`/job-cards/${j._id}`);
+                                }}
+                              >
+                                <span className="text-sm">✏️</span>
+                                <span>Open Order</span>
+                              </button>
+
+                              <button
+                                type="button"
+                                className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-xs font-semibold text-emerald-700 transition hover:bg-emerald-50"
+                                onClick={() => {
+                                  setActiveActionId(null);
+                                  router.push(`/sales/new?fromJobCard=${j._id}`);
+                                }}
+                              >
+                                <span className="text-sm">⚡</span>
+                                <span>Move to Sale</span>
+                              </button>
+
+                              <div className="my-1 border-t border-ink-100" />
+                              <div className="px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-ink-400">
+                                Change Status
+                              </div>
+
+                              <button
+                                type="button"
+                                className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-xs font-medium text-amber-700 transition hover:bg-amber-50"
+                                onClick={() => void updateOrderStatus(j._id, 'partially_ready')}
+                              >
+                                <span>🟡</span>
+                                <span>Partially Ready</span>
+                              </button>
+
+                              <button
+                                type="button"
+                                className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-xs font-medium text-emerald-700 transition hover:bg-emerald-50"
+                                onClick={() => void updateOrderStatus(j._id, 'ready')}
+                              >
+                                <span>✓</span>
+                                <span>Complete (Ready)</span>
+                              </button>
+
+                              <button
+                                type="button"
+                                className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-xs font-medium text-brand-700 transition hover:bg-brand-50"
+                                onClick={() => void updateOrderStatus(j._id, 'open')}
+                              >
+                                <span>⏳</span>
+                                <span>Pending (Open)</span>
+                              </button>
+
+                              <button
+                                type="button"
+                                className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-xs font-medium text-ink-700 transition hover:bg-ink-100"
+                                onClick={() => void updateOrderStatus(j._id, 'delivered')}
+                              >
+                                <span>🚚</span>
+                                <span>Delivered</span>
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
         )}
       </Modal>
     </div>

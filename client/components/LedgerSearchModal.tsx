@@ -138,7 +138,7 @@ export function LedgerSearchModal({
           <div className="mb-4 flex flex-wrap items-center gap-2">
             <TextInput
               autoFocus
-              placeholder="Type name or phone…"
+              placeholder="Search by name, phone, book #, or order #…"
               value={q}
               onChange={(e) => setQ(e.target.value)}
               className="min-w-0 flex-1"
@@ -181,7 +181,23 @@ export function LedgerSearchModal({
                         }`}
                       >
                         <td className="td font-mono text-[13px]">{l.phone || '—'}</td>
-                        <td className="td font-semibold">{l.name}</td>
+                        <td className="td font-semibold">
+                          <div>{l.name}</div>
+                          {(l.latestBookNo != null || l.latestOrderNo != null) && (
+                            <div className="mt-0.5 flex items-center gap-1.5 text-[10px] font-mono text-ink-500 font-normal">
+                              {l.latestBookNo != null && (
+                                <span className="rounded bg-brand-50 px-1 py-0.2 text-brand-700 font-semibold border border-brand-200/60">
+                                  Book #{l.latestBookNo}
+                                </span>
+                              )}
+                              {l.latestOrderNo != null && (
+                                <span className="rounded bg-ink-100 px-1 py-0.2 text-ink-700 font-semibold">
+                                  Order #{l.latestOrderNo}
+                                </span>
+                              )}
+                            </div>
+                          )}
+                        </td>
                         <td className="td">
                           <span className="badge bg-ink-100 text-ink-600">{l.type}</span>
                         </td>

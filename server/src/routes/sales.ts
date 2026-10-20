@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import { Types } from 'mongoose';
 import { Sale } from '../models/Sale';
 import { JobCard } from '../models/JobCard';
 import { nextSeq, peekSeq } from '../models/Counter';
@@ -13,21 +14,55 @@ saleRouter.use(requireAuth);
 
 const DEFAULT_TAX_RATE = 5;
 
-function searchFilter(q?: string) {
-  if (!q) return {};
-  const trimmed = q.trim();
-  const rx = new RegExp(trimmed.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
-  const or: Record<string, unknown>[] = [
-    { partyName: rx },
-    { phone: rx },
-    { jobCardRef: rx },
-    { refNo: rx },
-    { bookingNo: rx },
-  ];
-  const stripped = trimmed.replace(/^b-?/i, '');
-  const asNum = Number(stripped);
-  if (Number.isFinite(asNum) && stripped !== '') or.push({ billNo: asNum });
-  return { $or: or };
+function searchFilter(q?: string, ledgerId?: string) {
+  const trimmed = (q || '').trim();
+  const escaped = trimmed.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const rx = trimmed ? new RegExp(escaped, 'i') : null;
+
+  let queryOr: Record<string, unknown>[] | null = null;
+  if (trimmed && rx) {
+    queryOr = [
+      { partyName: rx },
+      { phone: rx },
+      { jobCardRef: rx },
+      { refNo: rx },
+      { bookingNo: rx },
+    ];
+    const stripped = trimmed.replace(/^b-?/i, '');
+    const asNum = Number(stripped);
+    if (Number.isFinite(asNum) && stripped !== '') {
+      queryOr.push({ billNo: asNum });
+    }
+    const digitMatches = trimmed.match(/\d+/g);
+    if (digitMatches) {
+      for (const d of digitMatches) {
+        const n = Number(d);
+        if (Number.isFinite(n)) {
+          queryOr.push({ billNo: n });
+        }
+      }
+    }
+  }
+
+  if (ledgerId && Types.ObjectId.isValid(ledgerId)) {
+    const custOr: Record<string, unknown>[] = [
+      { ledgerId: new Types.ObjectId(ledgerId) },
+    ];
+    if (!queryOr) {
+      return { $or: custOr };
+    }
+    return {
+      $or: [
+        { $and: [{ $or: custOr }, { $or: queryOr }] },
+        { $or: queryOr },
+      ],
+    };
+  }
+
+  if (queryOr) {
+    return { $or: queryOr };
+  }
+  return {};
 }
 
 interface SaleItemBody {
@@ -99,10 +134,10 @@ saleRouter.get(
   '/',
   requirePerm('sales.view'),
   asyncHandler(async (req, res) => {
-    const { q, isReturn } = req.query as { q?: string; isReturn?: string };
+    const { q, isReturn, ledgerId } = req.query as { q?: string; isReturn?: string; ledgerId?: string };
     const page = Math.max(num(req.query.page, 1), 1);
     const limit = Math.min(Math.max(num(req.query.limit, 30), 1), 200);
-    const filter: Record<string, unknown> = { ...searchFilter(q) };
+    const filter: Record<string, unknown> = { ...searchFilter(q, ledgerId) };
     if (isReturn === 'true') filter.isReturn = true;
     else if (isReturn === 'false') filter.isReturn = false;
     const [rawItems, total] = await Promise.all([
