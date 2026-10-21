@@ -399,6 +399,21 @@ export function JobCardForm({ initial, mode }: { initial?: JobCard | null; mode:
     return r2(all - mine);
   }, [due, ledgerId, mode, initial?.ledgerId, initial?.balance]);
 
+  const calculatedStatus = useMemo(() => {
+    if (status === 'deleted') return 'deleted';
+    const validItems = items.filter((r) => r.code || r.productName || num(r.qty) > 0 || num(r.rate) > 0);
+    if (validItems.length === 0) return status;
+    const allInvoiced = validItems.every((r) => r.invoiced);
+    const allCompleted = validItems.every((r) => r.completed);
+    const hasCompleted = validItems.some((r) => r.completed);
+    const hasInvoiced = validItems.some((r) => r.invoiced);
+
+    if (allInvoiced && allCompleted) return 'delivered';
+    if (allCompleted) return 'ready';
+    if (hasCompleted || hasInvoiced) return 'partially_ready';
+    return 'open';
+  }, [items, status]);
+
   function loadDoc(d: JobCard) {
     setNo(d.no ?? null);
     setBookNo(String(d.bookNo));
@@ -451,24 +466,21 @@ export function JobCardForm({ initial, mode }: { initial?: JobCard | null; mode:
   }
 
   function payload() {
-    const allInvoiced = items.length > 0 && items.every((r) => r.invoiced);
-    const hasUnfinished = items.some((r) => !r.completed);
-    const hasUninvoiced = items.some((r) => !r.invoiced);
-    const hasCompletedItem = items.some((r) => r.completed);
-    const hasInvoicedItem = items.some((r) => r.invoiced);
+    const validItems = items.filter((r) => r.code || r.productName || num(r.qty) > 0 || num(r.rate) > 0);
+    const allInvoiced = validItems.length > 0 && validItems.every((r) => r.invoiced);
+    const allCompleted = validItems.length > 0 && validItems.every((r) => r.completed);
+    const hasCompleted = validItems.some((r) => r.completed);
+    const hasInvoiced = validItems.some((r) => r.invoiced);
+
     let nextStatus = status;
     if (status !== 'deleted') {
-      if (allInvoiced && !hasUnfinished) {
+      if (allInvoiced && allCompleted) {
         nextStatus = 'delivered';
-      } else if (hasInvoicedItem && hasUninvoiced) {
-        nextStatus = 'partially_ready';
-      } else if (hasCompletedItem && hasUnfinished) {
-        nextStatus = 'partially_ready';
-      } else if (hasCompletedItem && !hasUnfinished) {
+      } else if (allCompleted) {
         nextStatus = 'ready';
-      } else if (allInvoiced) {
+      } else if (hasCompleted || hasInvoiced) {
         nextStatus = 'partially_ready';
-      } else if (status === 'partially_ready' || status === 'ready') {
+      } else {
         nextStatus = 'open';
       }
     }
@@ -1225,8 +1237,8 @@ export function JobCardForm({ initial, mode }: { initial?: JobCard | null; mode:
                     <span className="inline-flex items-center rounded-md border border-rose-300 bg-rose-100 px-3 py-1 text-xs font-black uppercase tracking-wider text-rose-700 shadow-sm">
                       COMPLETED
                     </span>
-                  ) : status ? (
-                    <StatusBadge status={status} />
+                  ) : calculatedStatus ? (
+                    <StatusBadge status={calculatedStatus} />
                   ) : null}
                 </div>
               )}

@@ -402,14 +402,15 @@ saleRouter.post(
         }
 
         const allInvoiced = jc.items.length > 0 && jc.items.every((i: any) => i.invoiced);
-        const hasUnfinishedStitching = jc.items.some((i: any) => !i.completed);
+        const allCompleted = jc.items.length > 0 && jc.items.every((i: any) => i.completed);
         const hasCompletedItem = jc.items.some((i: any) => i.completed);
         const hasInvoicedItem = jc.items.some((i: any) => i.invoiced);
-        const hasUninvoicedItem = jc.items.some((i: any) => !i.invoiced);
 
-        if (allInvoiced && !hasUnfinishedStitching) {
+        if (allInvoiced && allCompleted) {
           jc.status = 'delivered';
-        } else if (hasInvoicedItem || hasCompletedItem || hasUninvoicedItem) {
+        } else if (allCompleted) {
+          jc.status = 'ready';
+        } else if (hasCompletedItem || hasInvoicedItem) {
           jc.status = 'partially_ready';
         } else {
           jc.status = 'open';

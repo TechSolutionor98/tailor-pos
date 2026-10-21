@@ -73,6 +73,12 @@ module.exports = {
           'Arial',
           'sans-serif',
         ],
+        heading: [
+          'Outfit',
+          'var(--font-sans)',
+          'Plus Jakarta Sans',
+          'sans-serif',
+        ],
       },
       boxShadow: {
         card: '0 1px 2px rgba(14, 22, 21, 0.04), 0 1px 3px rgba(14, 22, 21, 0.06)',

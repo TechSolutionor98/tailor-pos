@@ -18,6 +18,7 @@ export function AnchoredDropdown({
   open,
   width = 288,
   direction = 'down',
+  align = 'left',
   children,
   panelRef,
 }: {
@@ -27,6 +28,8 @@ export function AnchoredDropdown({
   width?: number;
   /** 'down' forces the panel to strictly open downwards below the anchor. */
   direction?: 'down' | 'auto';
+  /** 'left' aligns to anchor's left edge; 'right' aligns to anchor's right edge. */
+  align?: 'left' | 'right';
   children: React.ReactNode;
   /** So the owner can tell a click on the panel from a click outside it. */
   panelRef?: React.RefObject<HTMLDivElement>;
@@ -61,7 +64,8 @@ export function AnchoredDropdown({
       const gutter = 8;
       const w = Math.min(width, window.innerWidth - gutter * 2);
       // Keep the panel on screen when the field sits near the right edge.
-      const left = Math.max(gutter, Math.min(r.left, window.innerWidth - w - gutter));
+      const targetLeft = align === 'right' ? r.right - w : r.left;
+      const left = Math.max(gutter, Math.min(targetLeft, window.innerWidth - w - gutter));
       const below = window.innerHeight - r.bottom;
       const above = r.top;
       // Strictly open downwards by default unless direction is set to 'auto'.
@@ -83,7 +87,7 @@ export function AnchoredDropdown({
       window.removeEventListener('scroll', place, true);
       window.removeEventListener('resize', place);
     };
-  }, [open, mounted, anchorRef, width, direction]);
+  }, [open, mounted, anchorRef, width, direction, align]);
 
   if (!open || !mounted || !box) return null;
 

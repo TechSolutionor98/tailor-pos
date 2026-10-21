@@ -115,14 +115,17 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   // so it runs to the edges: a strip of page around it is width the counter
   // could be reading figures in. Every other screen opens with a title, which
   // needs somewhere to sit.
-  const fullBleed = /^\/job-cards\/[^/]+$/.test(pathname);
+  const fullBleed =
+    /^\/job-cards\/[^/]+$/.test(pathname) &&
+    pathname !== '/job-cards/ready' &&
+    pathname !== '/ready-orders';
 
   return (
     <div className="flex min-h-screen">
       <Sidebar open={navOpen} onClose={() => setNavOpen(false)} />
       <div className="flex min-w-0 flex-1 flex-col">
         <Topbar onMenu={() => setNavOpen(true)} />
-        <main className={`print-full mx-auto w-full max-w-[1400px] flex-1 ${fullBleed ? '' : 'p-2 sm:p-3'}`}>
+        <main className={`print-full mx-auto w-full max-w-[1500px] flex-1 ${fullBleed ? '' : 'px-4 py-4 sm:px-6 sm:py-5'}`}>
           {allowed ? children : <NoAccess permission={needed as string} />}
         </main>
         <footer className="no-print px-4 pb-3 text-center text-[11px] text-ink-400 sm:px-6">

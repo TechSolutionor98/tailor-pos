@@ -322,6 +322,8 @@ jobCardRouter.get(
         filter.status = { $in: ['delivered', 'converted'] };
       } else if (status === 'open' || status === 'pending') {
         filter.status = { $in: ['open', 'pending'] };
+      } else if (status === 'ready_and_partial' || status === 'ready_orders') {
+        filter.status = { $in: ['ready', 'partially_ready'] };
       } else if (status === 'all_history') {
         filter.status = { $ne: 'draft' };
       } else {
@@ -335,6 +337,15 @@ jobCardRouter.get(
       JobCard.find(filter).sort({ no: -1 }).skip((page - 1) * limit).limit(limit).lean(),
       JobCard.countDocuments(filter),
     ]);
+    for (const j of items as any[]) {
+      if (j.items && j.items.length > 0 && j.status !== 'delivered' && j.status !== 'deleted') {
+        const allDone = j.items.every((it: any) => it.completed);
+        if (allDone && j.status !== 'ready') {
+          j.status = 'ready';
+          void JobCard.updateOne({ _id: j._id }, { $set: { status: 'ready' } });
+        }
+      }
+    }
     res.json({ items, total, page, limit });
   }),
 );
@@ -490,7 +501,11 @@ jobCardRouter.post(
       bank: body.bank,
       creditCardNo: body.creditCardNo,
       payments: initialPayments,
-      status: computed.items.some((i: any) => i.completed) ? 'partially_ready' : 'open',
+      status: (() => {
+        const allDone = computed.items.length > 0 && computed.items.every((i: any) => i.completed);
+        const someDone = computed.items.some((i: any) => i.completed);
+        return allDone ? 'ready' : someDone ? 'partially_ready' : 'open';
+      })(),
     });
     await filePeople(body.ledgerId, body.measurementSets);
     await recordAudit(req, {
@@ -544,10 +559,11 @@ jobCardRouter.get(
       }
 
       const allInvoiced = doc.items.length > 0 && doc.items.every((i: any) => i.invoiced);
-      const hasUnfinished = doc.items.some((i: any) => !i.completed || !i.invoiced);
-      const hasInvoicedOrCompleted = doc.items.some((i: any) => i.invoiced || i.completed);
+      const allCompleted = doc.items.length > 0 && doc.items.every((i: any) => i.completed);
+      const hasCompleted = doc.items.some((i: any) => i.completed);
+      const hasInvoiced = doc.items.some((i: any) => i.invoiced);
 
-      if (allInvoiced && !doc.items.some((i: any) => !i.completed)) {
+      if (allInvoiced && allCompleted) {
         if (doc.status !== 'delivered' && doc.status !== 'deleted') {
           doc.status = 'delivered';
           await JobCard.updateOne(
@@ -555,8 +571,16 @@ jobCardRouter.get(
             { $set: { status: 'delivered', items: doc.items } },
           );
         }
-      } else if (hasInvoicedOrCompleted && hasUnfinished) {
-        if (doc.status !== 'partially_ready' && doc.status !== 'deleted') {
+      } else if (allCompleted) {
+        if (doc.status !== 'ready' && doc.status !== 'delivered' && doc.status !== 'deleted') {
+          doc.status = 'ready';
+          await JobCard.updateOne(
+            { _id: doc._id },
+            { $set: { status: 'ready', items: doc.items } },
+          );
+        }
+      } else if (hasCompleted || hasInvoiced) {
+        if (doc.status !== 'partially_ready' && doc.status !== 'delivered' && doc.status !== 'deleted') {
           doc.status = 'partially_ready';
           await JobCard.updateOne(
             { _id: doc._id },
@@ -646,8 +670,9 @@ jobCardRouter.put(
     }
 
     const allInvoiced = computed.items.length > 0 && computed.items.every((i: any) => i.invoiced);
-    const hasUninvoicedPending = computed.items.some((i: any) => !i.invoiced || !i.completed);
-    const hasInvoicedOrCompleted = computed.items.some((i: any) => i.invoiced || i.completed);
+    const allCompleted = computed.items.length > 0 && computed.items.every((i: any) => i.completed);
+    const hasCompleted = computed.items.some((i: any) => i.completed);
+    const hasInvoiced = computed.items.some((i: any) => i.invoiced);
 
     if (body.payments !== undefined) {
       existing.payments = (Array.isArray(body.payments) ? body.payments : [])
@@ -748,21 +773,24 @@ jobCardRouter.put(
       paymentMode: body.paymentMode || existing.paymentMode,
       bank: body.bank ?? existing.bank,
       creditCardNo: body.creditCardNo ?? existing.creditCardNo,
-      // Status transition: if all items are invoiced, status is delivered!
+      // Status transition: if all items are invoiced & completed, status is delivered; if all completed, ready!
       status: (() => {
         if (existing.status === 'deleted') {
           return existing.status;
         }
-        if (allInvoiced && !computed.items.some((i: any) => !i.completed)) {
+        if (allInvoiced && allCompleted) {
           return 'delivered';
         }
-        if (hasInvoicedOrCompleted) {
-          return hasUninvoicedPending ? 'partially_ready' : 'ready';
+        if (allCompleted) {
+          return 'ready';
+        }
+        if (hasCompleted || hasInvoiced) {
+          return 'partially_ready';
         }
         if (body.status && ['open', 'partially_ready', 'ready', 'closed', 'delivered'].includes(body.status)) {
           return body.status as any;
         }
-        return existing.status;
+        return 'open';
       })(),
     });
     existing.markModified('items');
@@ -1167,14 +1195,20 @@ async function convertToSale(doc: any, body: ConvertBody) {
     it.invoiceNo = `B-${billNo}`;
   }
 
-  const allInvoiced = (doc.items as any[])?.every((i: any) => i.invoiced);
-  const hasPendingItems = (doc.items as any[])?.some((i: any) => !i.invoiced || !i.completed);
-  if (allInvoiced) {
+  const docItems = (doc.items as any[]) || [];
+  const allInvoiced = docItems.length > 0 && docItems.every((i: any) => i.invoiced);
+  const allCompleted = docItems.length > 0 && docItems.every((i: any) => i.completed);
+  const hasCompleted = docItems.some((i: any) => i.completed);
+  const hasInvoiced = docItems.some((i: any) => i.invoiced);
+
+  if (allInvoiced && allCompleted) {
     doc.status = 'delivered';
-  } else if (hasPendingItems) {
+  } else if (allCompleted) {
+    doc.status = 'ready';
+  } else if (hasCompleted || hasInvoiced) {
     doc.status = 'partially_ready';
   } else {
-    doc.status = 'ready';
+    doc.status = 'open';
   }
   if (!doc.invoiceNo?.includes(`B-${billNo}`)) {
     doc.invoiceNo = doc.invoiceNo ? `${doc.invoiceNo}, B-${billNo}` : `B-${billNo}`;
