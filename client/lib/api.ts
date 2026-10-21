@@ -223,6 +223,7 @@ export const api = {
     next: () => get<{ billNo: number }>('/sales/next'),
     get: (id: string) => get<Sale>(`/sales/${id}`),
     create: (body: unknown) => post<Sale>('/sales', body),
+    delete: (id: string) => del<{ ok: boolean }>(`/sales/${id}`),
   },
 
   audit: {

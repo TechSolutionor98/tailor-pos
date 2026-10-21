@@ -323,7 +323,7 @@ jobCardRouter.get(
       } else if (status === 'open' || status === 'pending') {
         filter.status = { $in: ['open', 'pending'] };
       } else if (status === 'ready_and_partial' || status === 'ready_orders') {
-        filter.status = { $in: ['ready', 'partially_ready'] };
+        filter.status = { $in: ['ready', 'partially_ready', 'delivered', 'converted'] };
       } else if (status === 'all_history') {
         filter.status = { $ne: 'draft' };
       } else {

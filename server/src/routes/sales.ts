@@ -137,7 +137,10 @@ saleRouter.get(
     const { q, isReturn, ledgerId } = req.query as { q?: string; isReturn?: string; ledgerId?: string };
     const page = Math.max(num(req.query.page, 1), 1);
     const limit = Math.min(Math.max(num(req.query.limit, 30), 1), 200);
-    const filter: Record<string, unknown> = { ...searchFilter(q, ledgerId) };
+    const filter: Record<string, unknown> = {
+      isDeleted: { $ne: true },
+      ...searchFilter(q, ledgerId),
+    };
     if (isReturn === 'true') filter.isReturn = true;
     else if (isReturn === 'false') filter.isReturn = false;
     const [rawItems, total] = await Promise.all([
@@ -449,5 +452,65 @@ saleRouter.get(
       if (jc) orderStatus = jc.status;
     }
     res.json({ ...sale, orderStatus });
+  }),
+);
+
+// DELETE /sales/:id (soft delete)
+saleRouter.delete(
+  '/:id',
+  requirePerm('sales.create'),
+  asyncHandler(async (req, res) => {
+    const existing = await Sale.findById(req.params.id);
+    if (!existing) throw new HttpError(404, 'Invoice not found');
+
+    existing.isDeleted = true;
+    existing.deletedAt = new Date();
+    // @ts-ignore
+    existing.deletedBy = req.user?.username || req.user?.name || req.user?.id;
+    existing.status = 'deleted';
+    await existing.save();
+
+    // If linked to a job card, revert invoiced status on matching items
+    if (existing.jobCardId || existing.jobCardRef) {
+      const jc = await JobCard.findOne({
+        $or: [
+          ...(existing.jobCardId ? [{ _id: existing.jobCardId }] : []),
+          ...(existing.jobCardRef ? [{ ref: existing.jobCardRef }] : []),
+        ],
+      });
+      if (jc) {
+        if (Array.isArray(jc.items)) {
+          for (const it of jc.items) {
+            if (it.invoiceNo === String(existing.billNo)) {
+              it.invoiced = false;
+              it.invoiceNo = undefined;
+            }
+          }
+          jc.markModified('items');
+        }
+        if (jc.invoiceNo) {
+          const parts = jc.invoiceNo.split(',').map((p: string) => p.trim()).filter((p: string) => p && p !== String(existing.billNo));
+          jc.invoiceNo = parts.join(', ');
+        }
+        // Re-evaluate job card status
+        const allInvoiced = jc.items.length > 0 && jc.items.every((i: any) => i.invoiced);
+        const allCompleted = jc.items.length > 0 && jc.items.every((i: any) => i.completed);
+        const hasCompletedItem = jc.items.some((i: any) => i.completed);
+        const hasInvoicedItem = jc.items.some((i: any) => i.invoiced);
+
+        if (allInvoiced && allCompleted) {
+          jc.status = 'delivered';
+        } else if (allCompleted) {
+          jc.status = 'ready';
+        } else if (hasCompletedItem || hasInvoicedItem) {
+          jc.status = 'partially_ready';
+        } else {
+          jc.status = 'open';
+        }
+        await jc.save();
+      }
+    }
+
+    res.json({ ok: true, message: 'Invoice soft deleted successfully' });
   }),
 );

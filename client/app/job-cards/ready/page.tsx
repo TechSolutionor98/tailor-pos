@@ -113,47 +113,42 @@ function ReadyOrdersActionMenu({
         <div className="py-1 text-ink-800">
           <button
             type="button"
-            className="flex w-full items-center gap-2.5 px-3 py-1.5 text-left text-xs font-medium transition hover:bg-brand-50 hover:text-brand-800"
+            className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs font-medium transition hover:bg-brand-50 hover:text-brand-800"
             onClick={() => {
               setOpen(false);
               router.push(`/job-cards/${order._id}`);
             }}
           >
-            <svg className="h-3.5 w-3.5 text-ink-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-            </svg>
-            <span>Edit Order</span>
-          </button>
-
-          <button
-            type="button"
-            className="flex w-full items-center gap-2.5 px-3 py-1.5 text-left text-xs font-medium transition hover:bg-brand-50 hover:text-brand-800"
-            onClick={() => {
-              setOpen(false);
-              router.push(`/job-cards/${order._id}/invoice?print=1`);
-            }}
-          >
-            <svg className="h-3.5 w-3.5 text-ink-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4H7v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" />
-            </svg>
-            <span>Print Invoice</span>
+            <span className="text-sm">✏️</span>
+            <span>{order.status === 'deleted' ? 'View' : 'Edit'}</span>
           </button>
 
           {canConvert && (
             <button
               type="button"
-              className="flex w-full items-center gap-2.5 px-3 py-1.5 text-left text-xs font-medium text-emerald-700 transition hover:bg-emerald-50 hover:text-emerald-800"
+              className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs font-medium text-emerald-700 transition hover:bg-emerald-50 hover:text-emerald-800"
               onClick={() => {
                 setOpen(false);
                 router.push(`/sales/new?fromJobCard=${order._id}`);
               }}
+              title="Shift this stitching order into New Sale"
             >
-              <svg className="h-3.5 w-3.5 text-emerald-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
-              </svg>
+              <span className="text-sm">⚡</span>
               <span>Move to Sale</span>
             </button>
           )}
+
+          <button
+            type="button"
+            className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs font-medium transition hover:bg-brand-50 hover:text-brand-800"
+            onClick={() => {
+              setOpen(false);
+              router.push(`/job-cards/${order._id}/invoice?print=1`);
+            }}
+          >
+            <span className="text-sm">🖨</span>
+            <span>Print</span>
+          </button>
 
           {canEdit && (
             <>
@@ -192,13 +187,11 @@ function ReadyOrdersActionMenu({
               <div className="my-1 border-t border-ink-100" />
               <button
                 type="button"
-                className="flex w-full items-center gap-2.5 px-3 py-1.5 text-left text-xs font-medium text-rose-600 transition hover:bg-rose-50 hover:text-rose-700"
+                className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs font-medium text-rose-600 transition hover:bg-rose-50 hover:text-rose-700"
                 onClick={handleDelete}
               >
-                <svg className="h-3.5 w-3.5 text-rose-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                </svg>
-                <span>Delete Order</span>
+                <span className="text-sm">🗑</span>
+                <span>Delete</span>
               </button>
             </>
           )}
@@ -217,16 +210,16 @@ function ReadyOrdersInner() {
   const router = useRouter();
 
   const [q, setQ] = useState('');
-  const [mode, setMode] = useState<'all' | 'ready' | 'partially_ready'>('all');
+  const [mode, setMode] = useState<'all' | 'ready' | 'partially_ready' | 'delivered'>('all');
   const [rows, setRows] = useState<JobCard[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
 
   const load = useCallback(
-    async (query: string, m: 'all' | 'ready' | 'partially_ready') => {
+    async (query: string, m: 'all' | 'ready' | 'partially_ready' | 'delivered') => {
       setLoading(true);
       try {
-        const statusParam = m === 'all' ? 'ready_and_partial' : m;
+        const statusParam = m === 'all' ? 'ready_orders' : m;
         const r = await api.jobCards.list(query, statusParam, 1, 50);
         setRows(r.items);
         setTotal(r.total);
@@ -247,12 +240,13 @@ function ReadyOrdersInner() {
   const stats = useMemo(() => {
     const ready = rows.filter((r) => r.status === 'ready').length;
     const partial = rows.filter((r) => r.status === 'partially_ready').length;
+    const delivered = rows.filter((r) => r.status === 'delivered' || r.status === 'converted').length;
     const totalBalance = rows.reduce(
       (s, r) => s + (Number(r.balance) > 0 ? Number(r.balance) : 0),
       0,
     );
     const totalNet = rows.reduce((s, r) => s + (Number(r.netAmount) || 0), 0);
-    return { ready, partial, totalBalance, totalNet };
+    return { ready, partial, delivered, totalBalance, totalNet };
   }, [rows]);
 
   return (
@@ -281,7 +275,7 @@ function ReadyOrdersInner() {
       </div>
 
       {/* KPI Summary Cards */}
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
         <div className="rounded-2xl border border-ink-200/80 bg-white p-4 shadow-card transition-all hover:shadow-lift">
           <div className="flex items-center justify-between">
             <span className="text-xs font-bold uppercase tracking-wider text-ink-500 font-heading">
@@ -332,6 +326,25 @@ function ReadyOrdersInner() {
           </div>
           <p className="mt-0.5 text-[11px] font-medium text-amber-600/80">
             Some items still stitching
+          </p>
+        </div>
+
+        <div className="rounded-2xl border border-blue-200/80 bg-gradient-to-br from-white to-blue-50/40 p-4 shadow-card transition-all hover:shadow-lift">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-bold uppercase tracking-wider text-blue-800 font-heading">
+              Delivered
+            </span>
+            <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-blue-100 text-blue-800">
+              <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+              </svg>
+            </span>
+          </div>
+          <div className="mt-2 text-2xl font-black text-blue-700 font-heading">
+            {stats.delivered}
+          </div>
+          <p className="mt-0.5 text-[11px] font-medium text-blue-600/80">
+            Collected / Invoiced
           </p>
         </div>
 
@@ -387,6 +400,7 @@ function ReadyOrdersInner() {
               { value: 'all' as const, label: `All (${total})` },
               { value: 'ready' as const, label: `Ready (${stats.ready})` },
               { value: 'partially_ready' as const, label: `Partially Ready (${stats.partial})` },
+              { value: 'delivered' as const, label: `Delivered (${stats.delivered})` },
             ]}
             value={mode}
             onChange={setMode}
@@ -430,6 +444,7 @@ function ReadyOrdersInner() {
               <tbody className="divide-y divide-ink-100/70">
                 {rows.map((j) => {
                   const isReady = j.status === 'ready';
+                  const isDelivered = j.status === 'delivered' || j.status === 'converted';
                   const balanceNum = Number(j.balance) || 0;
                   return (
                     <tr
@@ -491,6 +506,11 @@ function ReadyOrdersInner() {
                             <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
                             <span>Ready</span>
                           </span>
+                        ) : isDelivered ? (
+                          <span className="inline-flex items-center gap-1.5 rounded-full border border-blue-300 bg-blue-50 px-2.5 py-0.5 text-[10px] font-extrabold text-blue-800 shadow-sm font-heading">
+                            <span className="h-1.5 w-1.5 rounded-full bg-blue-500" />
+                            <span>Delivered</span>
+                          </span>
                         ) : (
                           <span className="inline-flex items-center gap-1.5 rounded-full border border-amber-300 bg-amber-50 px-2.5 py-0.5 text-[10px] font-extrabold text-amber-900 shadow-sm font-heading">
                             <span className="h-1.5 w-1.5 rounded-full bg-amber-500" />
@@ -501,7 +521,7 @@ function ReadyOrdersInner() {
                       <td className="px-3 py-2.5 text-right whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
                         <ReadyOrdersActionMenu
                           order={j}
-                          canConvert={canConvert}
+                          canConvert={canConvert && !isDelivered}
                           canEdit={canEdit}
                           onDeleted={() => void load(q, mode)}
                           onUpdated={() => void load(q, mode)}

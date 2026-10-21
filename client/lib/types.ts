@@ -336,6 +336,10 @@ export interface Sale {
   cashPaid?: number;
   cardPaid?: number;
   bankPaid?: number;
+  isDeleted?: boolean;
+  deletedAt?: string;
+  deletedBy?: string;
+  status?: string;
 }
 
 export interface Page<T> {

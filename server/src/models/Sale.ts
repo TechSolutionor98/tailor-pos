@@ -91,6 +91,10 @@ export interface ISale extends Document {
     rate?: number;
   }[];
   materialTotal?: number;
+  isDeleted?: boolean;
+  deletedAt?: Date;
+  deletedBy?: string;
+  status?: string;
 }
 
 const materialSchema = new Schema(
@@ -185,6 +189,10 @@ const saleSchema = new Schema<ISale>(
     cashPaid: { type: Number, default: 0 },
     cardPaid: { type: Number, default: 0 },
     bankPaid: { type: Number, default: 0 },
+    isDeleted: { type: Boolean, default: false },
+    deletedAt: { type: Date },
+    deletedBy: { type: String, trim: true },
+    status: { type: String, trim: true, default: 'active' },
   },
   { timestamps: true },
 );

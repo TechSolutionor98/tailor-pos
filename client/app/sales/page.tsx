@@ -1,13 +1,124 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { api } from '@/lib/api';
 import { fmt, fmtDate } from '@/lib/format';
 import type { Sale } from '@/lib/types';
 import { Card, EmptyState, Seg, StatusBadge, TextInput } from '@/components/ui';
 import { useToast } from '@/components/Toast';
 import { useAuth } from '@/components/AuthContext';
+import { AnchoredDropdown } from '@/components/AnchoredDropdown';
+
+function SaleActionMenu({
+  sale,
+  canManage,
+  onDeleted,
+}: {
+  sale: Sale;
+  canManage: boolean;
+  onDeleted: () => void;
+}) {
+  const router = useRouter();
+  const { toast } = useToast();
+  const [open, setOpen] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const anchorRef = useRef<HTMLDivElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const away = (e: MouseEvent) => {
+      const t = e.target as Node;
+      if (anchorRef.current?.contains(t) || panelRef.current?.contains(t)) return;
+      setOpen(false);
+    };
+    const key = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setOpen(false);
+    };
+    document.addEventListener('mousedown', away);
+    document.addEventListener('keydown', key);
+    return () => {
+      document.removeEventListener('mousedown', away);
+      document.removeEventListener('keydown', key);
+    };
+  }, [open]);
+
+  const handleDelete = async () => {
+    setOpen(false);
+    if (!window.confirm(`Are you sure you want to delete invoice #${sale.billNo}?`)) {
+      return;
+    }
+    setDeleting(true);
+    try {
+      await api.sales.delete(sale._id);
+      toast(`Invoice #${sale.billNo} deleted successfully`, 'success');
+      onDeleted();
+    } catch (e) {
+      toast(e instanceof Error ? e.message : 'Failed to delete invoice', 'error');
+    } finally {
+      setDeleting(false);
+    }
+  };
+
+  return (
+    <div ref={anchorRef} className="relative inline-block text-right" onClick={(e) => e.stopPropagation()}>
+      <button
+        type="button"
+        className="btn-soft inline-flex items-center gap-1 !px-2.5 !py-1 text-xs font-semibold"
+        onClick={() => setOpen((prev) => !prev)}
+        aria-expanded={open}
+        disabled={deleting}
+      >
+        <span>Action</span>
+        <span className="text-[10px] text-ink-500">▾</span>
+      </button>
+
+      <AnchoredDropdown anchorRef={anchorRef} panelRef={panelRef} open={open} width={168} direction="auto" align="right">
+        <div className="py-1 text-ink-800">
+          <button
+            type="button"
+            className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs font-medium transition hover:bg-brand-50 hover:text-brand-800"
+            onClick={() => {
+              setOpen(false);
+              router.push(`/sales/${sale._id}`);
+            }}
+          >
+            <span className="text-sm">✏️</span>
+            <span>View / Edit</span>
+          </button>
+
+          <button
+            type="button"
+            className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs font-medium transition hover:bg-brand-50 hover:text-brand-800"
+            onClick={() => {
+              setOpen(false);
+              router.push(`/sales/${sale._id}?print=1`);
+            }}
+          >
+            <span className="text-sm">🖨</span>
+            <span>Print</span>
+          </button>
+
+          {canManage && (
+            <>
+              <div className="my-1 border-t border-ink-100" />
+              <button
+                type="button"
+                className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs font-medium text-rose-600 transition hover:bg-rose-50 hover:text-rose-700"
+                onClick={handleDelete}
+              >
+                <span className="text-sm">🗑</span>
+                <span>Delete</span>
+              </button>
+            </>
+          )}
+        </div>
+      </AnchoredDropdown>
+    </div>
+  );
+}
 
 export default function SalesPage() {
   const { can } = useAuth();
@@ -98,7 +209,7 @@ export default function SalesPage() {
                   <th className="th text-right">Advance</th>
                   <th className="th text-right">Balance</th>
                   <th className="th text-center">Status</th>
-                  <th className="th" />
+                  <th className="th text-right">Action</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-ink-50">
@@ -129,10 +240,12 @@ export default function SalesPage() {
                         <StatusBadge status="delivered" />
                       )}
                     </td>
-                    <td className="td">
-                      <Link href={`/sales/${s._id}`} className="text-xs font-bold text-brand-600 hover:underline">
-                        View →
-                      </Link>
+                    <td className="td text-right" onClick={(e) => e.stopPropagation()}>
+                      <SaleActionMenu
+                        sale={s}
+                        canManage={canManage}
+                        onDeleted={() => void load(q, mode)}
+                      />
                     </td>
                   </tr>
                 ))}
