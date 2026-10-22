@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { Suspense, useEffect, useState } from 'react';
 import { api } from '@/lib/api';
 import type { JobCard } from '@/lib/types';
 import { JobCardForm } from '@/components/JobCardForm';
@@ -40,5 +40,9 @@ export default function EditJobCardPage({ params }: { params: { id: string } }) 
     return <EmptyState title="Stitching order not found" sub="It may have been deleted." />;
   }
 
-  return <JobCardForm key={doc._id} mode="edit" initial={doc} />;
+  return (
+    <Suspense fallback={null}>
+      <JobCardForm key={doc._id} mode="edit" initial={doc} />
+    </Suspense>
+  );
 }

@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { api } from '@/lib/api';
 import { addDaysISO, fmt, fmtDate, num, orderNo, todayISO, toISODate } from '@/lib/format';
@@ -273,6 +273,19 @@ export function JobCardForm({ initial, mode }: { initial?: JobCard | null; mode:
   const isCompleted =
     mode !== 'new' && (status === 'converted' || status === 'delivered' || status === 'closed' || status === 'deleted');
   const readOnly = mode === 'new' ? false : isCompleted;
+
+  const searchParams = useSearchParams();
+  const actionParam = searchParams?.get('action');
+
+  useEffect(() => {
+    if (actionParam === 'partially_ready') {
+      const timer = setTimeout(() => {
+        const el = document.getElementById('order-items-section');
+        el?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }, 400);
+      return () => clearTimeout(timer);
+    }
+  }, [actionParam]);
 
   // Hide the actions this user cannot perform; the API enforces the same rules.
   const { can } = useAuth();
@@ -1347,7 +1360,7 @@ export function JobCardForm({ initial, mode }: { initial?: JobCard | null; mode:
           </section>
 
           {/* order items */}
-          <section className="border-t border-ink-200 p-5">
+          <section id="order-items-section" className="border-t border-ink-200 p-5">
             <div className="mb-3 flex items-center justify-between">
               <h2 className="text-base font-extrabold tracking-tight text-ink-900">Order Items</h2>
               {!readOnly && (
@@ -1364,6 +1377,18 @@ export function JobCardForm({ initial, mode }: { initial?: JobCard | null; mode:
                 </button>
               )}
             </div>
+
+            {actionParam === 'partially_ready' && (
+              <div className="mb-3.5 flex items-center justify-between rounded-xl bg-amber-50 px-4 py-3 text-xs font-medium text-amber-900 border border-amber-300 shadow-sm animate-pulse">
+                <div className="flex items-center gap-2.5">
+                  <span className="text-lg">✂️</span>
+                  <span>
+                    <strong className="font-bold text-amber-950">Partially Ready Mode:</strong> Ready hone wali products ke aagay <strong>Mark Complete</strong> button dabayein, aur phir neeche <strong>Save</strong> button dabayein.
+                  </span>
+                </div>
+              </div>
+            )}
+
             <div className="overflow-x-auto rounded-xl border border-ink-200 no-scrollbar">
               <table className="w-full table-fixed">
                 <colgroup>

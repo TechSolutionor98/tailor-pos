@@ -202,7 +202,8 @@ export const api = {
     close: (id: string) => post<JobCard>(`/jobcards/${id}/close`),
     reopen: (id: string) => post<JobCard>(`/jobcards/${id}/reopen`),
     setPending: (id: string) => post<JobCard>(`/jobcards/${id}/pending`),
-    complete: (id: string) => post<JobCard>(`/jobcards/${id}/complete`),
+    markReady: (id: string) => post<JobCard>(`/jobcards/${id}/ready`),
+    complete: (id: string) => post<JobCard>(`/jobcards/${id}/ready`),
     updateStatus: (id: string, status: string) =>
       patch<JobCard>(`/jobcards/${id}/status`, { status }),
     convert: (id: string, body: unknown) =>

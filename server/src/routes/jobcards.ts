@@ -323,7 +323,7 @@ jobCardRouter.get(
       } else if (status === 'open' || status === 'pending') {
         filter.status = { $in: ['open', 'pending'] };
       } else if (status === 'ready_and_partial' || status === 'ready_orders') {
-        filter.status = { $in: ['ready', 'partially_ready', 'delivered', 'converted'] };
+        filter.status = { $in: ['ready', 'partially_ready'] };
       } else if (status === 'all_history') {
         filter.status = { $ne: 'draft' };
       } else {
@@ -957,6 +957,12 @@ jobCardRouter.patch(
     }
     const doc = await JobCard.findById(req.params.id);
     if (!doc) throw new HttpError(404, 'Stitching order not found');
+
+    const hasInvoiced = Boolean(doc.invoiceNo) || (doc.items || []).some((i: any) => Boolean(i.invoiced));
+    if (status === 'open' && hasInvoiced) {
+      throw new HttpError(400, 'Cannot set order status to Pending because some items are already invoiced');
+    }
+
     const before = snapshotJobCard(doc.toObject());
 
     doc.status = status as any;
@@ -1031,15 +1037,15 @@ jobCardRouter.post(
   }),
 );
 
-// POST /jobcards/:id/complete
+// POST /jobcards/:id/ready
 jobCardRouter.post(
-  '/:id/complete',
+  '/:id/ready',
   requirePerm('jobcards.edit'),
   asyncHandler(async (req, res) => {
     const doc = await JobCard.findById(req.params.id);
     if (!doc) throw new HttpError(404, 'Stitching order not found');
     const before = snapshotJobCard(doc.toObject());
-    doc.status = 'closed';
+    doc.status = 'ready';
     doc.closedAt = new Date();
     if (doc.items && doc.items.length > 0) {
       doc.items.forEach((item: any) => {
@@ -1048,10 +1054,36 @@ jobCardRouter.post(
     }
     await doc.save();
     await recordAudit(req, {
-      action: 'close',
+      action: 'update',
       doc,
       changes: diffSnapshots(before, snapshotJobCard(doc.toObject())),
-      summary: `Order #${doc.no ?? doc.ref} marked as Complete`,
+      summary: `Order #${doc.no ?? doc.ref} marked as Ready (all items completed)`,
+    });
+    res.json(doc);
+  }),
+);
+
+// POST /jobcards/:id/complete (alias to mark ready)
+jobCardRouter.post(
+  '/:id/complete',
+  requirePerm('jobcards.edit'),
+  asyncHandler(async (req, res) => {
+    const doc = await JobCard.findById(req.params.id);
+    if (!doc) throw new HttpError(404, 'Stitching order not found');
+    const before = snapshotJobCard(doc.toObject());
+    doc.status = 'ready';
+    doc.closedAt = new Date();
+    if (doc.items && doc.items.length > 0) {
+      doc.items.forEach((item: any) => {
+        item.completed = true;
+      });
+    }
+    await doc.save();
+    await recordAudit(req, {
+      action: 'update',
+      doc,
+      changes: diffSnapshots(before, snapshotJobCard(doc.toObject())),
+      summary: `Order #${doc.no ?? doc.ref} marked as Ready (all items completed)`,
     });
     res.json(doc);
   }),
@@ -1080,6 +1112,12 @@ jobCardRouter.post(
   asyncHandler(async (req, res) => {
     const doc = await JobCard.findById(req.params.id);
     if (!doc) throw new HttpError(404, 'Stitching order not found');
+
+    const hasInvoiced = Boolean(doc.invoiceNo) || (doc.items || []).some((i: any) => Boolean(i.invoiced));
+    if (hasInvoiced) {
+      throw new HttpError(400, 'Cannot set order status to Pending because some items are already invoiced');
+    }
+
     const before = snapshotJobCard(doc.toObject());
     doc.status = 'open';
     doc.closedAt = undefined;
@@ -1087,6 +1125,13 @@ jobCardRouter.post(
     doc.deletedAt = undefined;
     // @ts-ignore
     doc.deletedBy = undefined;
+    if (doc.items && doc.items.length > 0) {
+      doc.items.forEach((item: any) => {
+        if (!item.invoiced) {
+          item.completed = false;
+        }
+      });
+    }
     await doc.save();
     await recordAudit(req, {
       action: 'update',

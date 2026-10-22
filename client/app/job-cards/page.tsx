@@ -33,6 +33,7 @@ function OrderActionMenu({
   const [updating, setUpdating] = useState(false);
   const anchorRef = useRef<HTMLDivElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
+  const hasInvoiced = Boolean(order.invoiceNo) || (order.items || []).some((i) => Boolean(i.invoiced));
 
   useEffect(() => {
     if (!open) return;
@@ -67,16 +68,16 @@ function OrderActionMenu({
     }
   };
 
-  const handleComplete = async () => {
+  const handleReady = async () => {
     setOpen(false);
     const numStr = order.no ?? order.ref;
     setUpdating(true);
     try {
-      await api.jobCards.complete(order._id);
-      toast(`Order #${numStr} marked as Complete`, 'success');
+      await api.jobCards.markReady(order._id);
+      toast(`Order #${numStr} marked as Ready`, 'success');
       onUpdated?.();
     } catch (e) {
-      toast(e instanceof Error ? e.message : 'Failed to complete order', 'error');
+      toast(e instanceof Error ? e.message : 'Failed to mark order as ready', 'error');
     } finally {
       setUpdating(false);
     }
@@ -170,15 +171,30 @@ function OrderActionMenu({
             <button
               type="button"
               className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs font-medium text-emerald-700 transition hover:bg-emerald-50 hover:text-emerald-800"
-              onClick={handleComplete}
+              onClick={handleReady}
               disabled={updating}
             >
               <span className="text-sm">✓</span>
-              <span>Complete</span>
+              <span>Ready</span>
             </button>
           )}
 
-          {canEdit && order.status !== 'open' && (
+          {canEdit && order.status !== 'deleted' && order.status !== 'delivered' && order.status !== 'converted' && (
+            <button
+              type="button"
+              className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs font-medium text-amber-700 transition hover:bg-amber-50 hover:text-amber-800"
+              onClick={() => {
+                setOpen(false);
+                router.push(`/job-cards/${order._id}?action=partially_ready#order-items-section`);
+              }}
+              title="Open order to mark individual products as completed"
+            >
+              <span className="text-sm">✂️</span>
+              <span>Partially Ready</span>
+            </button>
+          )}
+
+          {canEdit && order.status !== 'open' && order.status !== 'deleted' && !hasInvoiced && (
             <button
               type="button"
               className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs font-medium text-amber-700 transition hover:bg-amber-50 hover:text-amber-800"

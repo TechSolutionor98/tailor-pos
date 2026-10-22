@@ -88,12 +88,12 @@ function ReadyOrdersActionMenu({
     }
   };
 
+  const hasInvoiced = Boolean(order.invoiceNo) || (order.items || []).some((i) => Boolean(i.invoiced));
   const statusOptions = [
     { value: 'ready', label: 'Ready', dot: 'bg-emerald-500' },
     { value: 'partially_ready', label: 'Partially Ready', dot: 'bg-amber-500' },
-    { value: 'open', label: 'Pending', dot: 'bg-blue-500' },
+    ...(hasInvoiced ? [] : [{ value: 'open', label: 'Pending', dot: 'bg-blue-500' }]),
     { value: 'delivered', label: 'Delivered', dot: 'bg-indigo-500' },
-    { value: 'closed', label: 'Completed', dot: 'bg-ink-400' },
   ];
 
   return (
@@ -149,6 +149,21 @@ function ReadyOrdersActionMenu({
             <span className="text-sm">🖨</span>
             <span>Print</span>
           </button>
+
+          {canEdit && order.status !== 'deleted' && order.status !== 'delivered' && order.status !== 'converted' && (
+            <button
+              type="button"
+              className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs font-medium text-amber-700 transition hover:bg-amber-50 hover:text-amber-800"
+              onClick={() => {
+                setOpen(false);
+                router.push(`/job-cards/${order._id}?action=partially_ready#order-items-section`);
+              }}
+              title="Open order to mark individual products as completed"
+            >
+              <span className="text-sm">✂️</span>
+              <span>Partially Ready</span>
+            </button>
+          )}
 
           {canEdit && (
             <>
@@ -210,13 +225,13 @@ function ReadyOrdersInner() {
   const router = useRouter();
 
   const [q, setQ] = useState('');
-  const [mode, setMode] = useState<'all' | 'ready' | 'partially_ready' | 'delivered'>('all');
+  const [mode, setMode] = useState<'all' | 'ready' | 'partially_ready'>('all');
   const [rows, setRows] = useState<JobCard[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
 
   const load = useCallback(
-    async (query: string, m: 'all' | 'ready' | 'partially_ready' | 'delivered') => {
+    async (query: string, m: 'all' | 'ready' | 'partially_ready') => {
       setLoading(true);
       try {
         const statusParam = m === 'all' ? 'ready_orders' : m;
@@ -240,13 +255,12 @@ function ReadyOrdersInner() {
   const stats = useMemo(() => {
     const ready = rows.filter((r) => r.status === 'ready').length;
     const partial = rows.filter((r) => r.status === 'partially_ready').length;
-    const delivered = rows.filter((r) => r.status === 'delivered' || r.status === 'converted').length;
     const totalBalance = rows.reduce(
       (s, r) => s + (Number(r.balance) > 0 ? Number(r.balance) : 0),
       0,
     );
     const totalNet = rows.reduce((s, r) => s + (Number(r.netAmount) || 0), 0);
-    return { ready, partial, delivered, totalBalance, totalNet };
+    return { ready, partial, totalBalance, totalNet };
   }, [rows]);
 
   return (
@@ -275,7 +289,7 @@ function ReadyOrdersInner() {
       </div>
 
       {/* KPI Summary Cards */}
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <div className="rounded-2xl border border-ink-200/80 bg-white p-4 shadow-card transition-all hover:shadow-lift">
           <div className="flex items-center justify-between">
             <span className="text-xs font-bold uppercase tracking-wider text-ink-500 font-heading">
@@ -326,25 +340,6 @@ function ReadyOrdersInner() {
           </div>
           <p className="mt-0.5 text-[11px] font-medium text-amber-600/80">
             Some items still stitching
-          </p>
-        </div>
-
-        <div className="rounded-2xl border border-blue-200/80 bg-gradient-to-br from-white to-blue-50/40 p-4 shadow-card transition-all hover:shadow-lift">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-bold uppercase tracking-wider text-blue-800 font-heading">
-              Delivered
-            </span>
-            <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-blue-100 text-blue-800">
-              <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-              </svg>
-            </span>
-          </div>
-          <div className="mt-2 text-2xl font-black text-blue-700 font-heading">
-            {stats.delivered}
-          </div>
-          <p className="mt-0.5 text-[11px] font-medium text-blue-600/80">
-            Collected / Invoiced
           </p>
         </div>
 
@@ -400,7 +395,6 @@ function ReadyOrdersInner() {
               { value: 'all' as const, label: `All (${total})` },
               { value: 'ready' as const, label: `Ready (${stats.ready})` },
               { value: 'partially_ready' as const, label: `Partially Ready (${stats.partial})` },
-              { value: 'delivered' as const, label: `Delivered (${stats.delivered})` },
             ]}
             value={mode}
             onChange={setMode}
