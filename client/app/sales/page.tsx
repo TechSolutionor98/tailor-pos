@@ -79,14 +79,26 @@ function SaleActionMenu({
         <div className="py-1 text-ink-800">
           <button
             type="button"
+            className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs font-medium text-brand-700 transition hover:bg-brand-50 hover:text-brand-800"
+            onClick={() => {
+              setOpen(false);
+              router.push(`/sales/${sale._id}?edit=1`);
+            }}
+          >
+            <span className="text-sm">✏️</span>
+            <span>Edit</span>
+          </button>
+
+          <button
+            type="button"
             className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs font-medium transition hover:bg-brand-50 hover:text-brand-800"
             onClick={() => {
               setOpen(false);
               router.push(`/sales/${sale._id}`);
             }}
           >
-            <span className="text-sm">✏️</span>
-            <span>View / Edit</span>
+            <span className="text-sm">👁</span>
+            <span>View Invoice</span>
           </button>
 
           <button
@@ -234,10 +246,10 @@ export default function SalesPage() {
                     <td className="td text-center">
                       {s.isReturn ? (
                         <StatusBadge status="return" />
-                      ) : s.orderStatus ? (
-                        <StatusBadge status={s.orderStatus} />
+                      ) : s.isDeleted || s.status === 'cancelled' ? (
+                        <StatusBadge status="deleted" />
                       ) : (
-                        <StatusBadge status="delivered" />
+                        <StatusBadge status="closed" />
                       )}
                     </td>
                     <td className="td text-right" onClick={(e) => e.stopPropagation()}>

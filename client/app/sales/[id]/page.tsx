@@ -7,6 +7,7 @@ import { api } from '@/lib/api';
 import type { Ledger, Sale } from '@/lib/types';
 import { Card } from '@/components/ui';
 import { SaleInvoice } from '@/components/SaleInvoice';
+import { SaleForm } from '@/components/SaleForm';
 import { useSettings } from '@/components/SettingsContext';
 import { useToast } from '@/components/Toast';
 
@@ -18,6 +19,14 @@ export default function SaleDetailPage({ params }: { params: { id: string } }) {
   const [loading, setLoading] = useState(true);
   const searchParams = useSearchParams();
   const autoPrint = searchParams?.get('print') === '1';
+  const initialEdit = searchParams?.get('edit') === '1';
+  const [isEditing, setIsEditing] = useState(initialEdit);
+
+  useEffect(() => {
+    if (searchParams?.get('edit') === '1') {
+      setIsEditing(true);
+    }
+  }, [searchParams]);
 
   useEffect(() => {
     let live = true;
@@ -47,7 +56,7 @@ export default function SaleDetailPage({ params }: { params: { id: string } }) {
 
   // Arrived here from Save and print: wait for logos/images to decode then print
   useEffect(() => {
-    if (!autoPrint || loading || !sale) return;
+    if (isEditing || !autoPrint || loading || !sale) return;
     let cancelled = false;
     const t = setTimeout(() => {
       const pending = Array.from(document.querySelectorAll('img'))
@@ -70,7 +79,7 @@ export default function SaleDetailPage({ params }: { params: { id: string } }) {
       cancelled = true;
       clearTimeout(t);
     };
-  }, [autoPrint, loading, sale]);
+  }, [isEditing, autoPrint, loading, sale]);
 
   if (loading) {
     return (
@@ -91,6 +100,39 @@ export default function SaleDetailPage({ params }: { params: { id: string } }) {
     );
   }
 
+  if (isEditing) {
+    return (
+      <div className="space-y-4">
+        <div className="no-print flex items-center justify-between">
+          <button
+            type="button"
+            onClick={() => setIsEditing(false)}
+            className="btn-soft inline-flex items-center gap-1.5 font-bold"
+          >
+            <span>←</span>
+            <span>Back to Invoice Preview</span>
+          </button>
+          <span className="text-xs font-bold text-ink-500">
+            Editing Bill #{sale.billNo}
+          </span>
+        </div>
+        <SaleForm
+          initial={sale}
+          mode="edit"
+          onDone={async () => {
+            setIsEditing(false);
+            try {
+              const updated = await api.sales.get(params.id);
+              setSale(updated);
+            } catch {
+              /* ignore */
+            }
+          }}
+        />
+      </div>
+    );
+  }
+
   return (
     <div>
       <div className="no-print mb-5 flex flex-wrap items-center gap-3">
@@ -100,6 +142,15 @@ export default function SaleDetailPage({ params }: { params: { id: string } }) {
         <Link href="/sales/new" className="btn-soft">
           + New sale
         </Link>
+        <button
+          type="button"
+          className="btn-soft inline-flex items-center gap-1.5 font-bold text-brand-700 hover:bg-brand-50"
+          onClick={() => setIsEditing(true)}
+          title="Edit this sale / return bill"
+        >
+          <span>✏️</span>
+          <span>Edit Bill</span>
+        </button>
         <button className="btn-primary ml-auto" onClick={() => window.print()}>
           🖨 Print / PDF
         </button>

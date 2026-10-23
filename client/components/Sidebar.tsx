@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { usePathname } from 'next/navigation';
+import { usePathname, useSearchParams } from 'next/navigation';
 import { useEffect } from 'react';
 import { useAuth } from '@/components/AuthContext';
 import { Icon, type IconName } from '@/components/icons';
@@ -27,13 +27,13 @@ const NAV: NavGroup[] = [
     section: 'Tailoring',
     items: [
       { href: '/job-cards', label: 'All Orders', icon: 'jobcards', permission: 'jobcards.view' },
-      { href: '/job-cards/ready', label: 'Ready Orders', icon: 'sparkle', permission: 'jobcards.view' },
       { href: '/job-cards/new', label: 'New Order', icon: 'plus', permission: 'jobcards.create' },
     ],
   },
   {
     section: 'Billing',
     items: [
+      { href: '/job-cards/ready', label: 'Ready Orders', icon: 'sparkle', permission: 'jobcards.view' },
       { href: '/sales', label: 'Sales / Return', icon: 'sales', permission: 'sales.view' },
       { href: '/sales/new', label: 'New Sale', icon: 'plus', permission: 'sales.create' },
     ],
@@ -61,14 +61,50 @@ const NAV: NavGroup[] = [
   },
 ];
 
-function isActive(pathname: string, href: string) {
+const ALL_HREFS = NAV.flatMap((g) => g.items.map((i) => i.href));
+
+function isActive(pathname: string, from: string | null, href: string) {
   if (href === '/') return pathname === '/';
-  if (href === '/job-cards/new' || href === '/sales/new') return pathname === href;
-  return pathname === href || pathname.startsWith(href + '/');
+
+  // Order detail / edit page (/job-cards/[id])
+  const isJobCardDetail =
+    pathname.startsWith('/job-cards/') &&
+    pathname !== '/job-cards/ready' &&
+    pathname !== '/job-cards/new';
+
+  if (isJobCardDetail) {
+    if (from === 'ready') {
+      return href === '/job-cards/ready';
+    }
+    return href === '/job-cards';
+  }
+
+  // Sale detail / edit page (/sales/[id] or /sales/[id]/edit)
+  const isSaleDetail =
+    pathname.startsWith('/sales/') &&
+    pathname !== '/sales/new';
+
+  if (isSaleDetail) {
+    return false;
+  }
+
+  if (pathname !== href && !pathname.startsWith(href + '/')) return false;
+
+  // If this href matches, make sure there is no more specific (longer) matching href in NAV
+  const hasMoreSpecific = ALL_HREFS.some(
+    (otherHref) =>
+      otherHref !== href &&
+      otherHref.length > href.length &&
+      (pathname === otherHref || pathname.startsWith(otherHref + '/')),
+  );
+
+  return !hasMoreSpecific;
 }
 
 export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void }) {
   const pathname = usePathname() ?? '/';
+  const searchParams = useSearchParams();
+  const from = searchParams?.get('from') ?? null;
   const { can } = useAuth();
 
   // Close the drawer whenever the route changes, and on Escape.
@@ -143,7 +179,7 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
             )}
             <div className="space-y-0.5">
               {g.items.map((n) => {
-                const active = isActive(pathname, n.href);
+                const active = isActive(pathname, from, n.href);
                 return (
                   <Link
                     key={n.href}

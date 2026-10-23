@@ -336,7 +336,7 @@ export default function DashboardPage() {
                           <td className="td">{fmtDate(s.billDate)}</td>
                           <td className="td text-right font-bold tabular-nums">{fmt(s.netAmount)}</td>
                           <td className="td">
-                            <span className={s.isReturn ? 'badge bg-rose-100 text-rose-700' : 'badge-open'}>
+                            <span className={s.isReturn ? 'badge bg-rose-100 text-rose-700 border border-rose-300' : 'badge bg-emerald-50 text-emerald-800 border border-emerald-300'}>
                               {s.isReturn ? 'return' : 'sale'}
                             </span>
                           </td>

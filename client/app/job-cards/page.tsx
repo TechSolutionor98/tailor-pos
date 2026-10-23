@@ -182,7 +182,7 @@ function OrderActionMenu({
           {canEdit && order.status !== 'deleted' && order.status !== 'delivered' && order.status !== 'converted' && (
             <button
               type="button"
-              className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs font-medium text-amber-700 transition hover:bg-amber-50 hover:text-amber-800"
+              className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs font-medium text-blue-700 transition hover:bg-blue-50 hover:text-blue-800"
               onClick={() => {
                 setOpen(false);
                 router.push(`/job-cards/${order._id}?action=partially_ready#order-items-section`);
@@ -197,7 +197,7 @@ function OrderActionMenu({
           {canEdit && order.status !== 'open' && order.status !== 'deleted' && !hasInvoiced && (
             <button
               type="button"
-              className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs font-medium text-amber-700 transition hover:bg-amber-50 hover:text-amber-800"
+              className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs font-medium text-rose-700 transition hover:bg-rose-50 hover:text-rose-800"
               onClick={handlePending}
               disabled={updating}
             >

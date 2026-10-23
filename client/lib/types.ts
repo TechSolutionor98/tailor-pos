@@ -291,6 +291,7 @@ export interface Sale {
   creditCardNo?: string;
   jobCardRef?: string;
   jobCardId?: string;
+  jobCardIds?: string[];
   orderStatus?: JobCardStatus | string;
   bookingNo?: string;
   refNo?: string;

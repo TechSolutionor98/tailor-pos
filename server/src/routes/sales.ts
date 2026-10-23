@@ -90,6 +90,7 @@ interface SaleBody {
   creditCardNo?: string;
   jobCardRef?: string;
   jobCardId?: string;
+  jobCardIds?: string[];
   salesman?: string;
   partyName?: string;
   phone?: string;
@@ -148,7 +149,9 @@ saleRouter.get(
       Sale.countDocuments(filter),
     ]);
 
-    const jcIds = rawItems.map((s) => s.jobCardId).filter(Boolean);
+    const jcIds = rawItems
+      .flatMap((s: any) => [s.jobCardId, ...(Array.isArray(s.jobCardIds) ? s.jobCardIds : [])])
+      .filter(Boolean);
     const jcRefs = rawItems.map((s) => s.jobCardRef).filter(Boolean);
 
     const jobCards = await JobCard.find({
@@ -172,7 +175,12 @@ saleRouter.get(
         (s.jobCardRef && jcMap.get(s.jobCardRef)) ||
         (s as any).orderStatus ||
         undefined;
-      return { ...s, orderStatus };
+      const status = s.isDeleted || s.status === 'cancelled'
+        ? 'deleted'
+        : s.isReturn
+          ? 'return'
+          : 'closed';
+      return { ...s, status, orderStatus };
     });
 
     res.json({ items, total, page, limit });
@@ -294,7 +302,8 @@ saleRouter.post(
       category: body.category || 'A',
       creditCardNo: body.creditCardNo,
       jobCardRef: body.jobCardRef?.trim(),
-      jobCardId: body.jobCardId || undefined,
+      jobCardId: body.jobCardId || (Array.isArray(body.jobCardIds) && body.jobCardIds[0] ? (body.jobCardIds[0] as any) : undefined),
+      jobCardIds: Array.isArray(body.jobCardIds) && body.jobCardIds.length > 0 ? (body.jobCardIds as any) : (body.jobCardId ? [body.jobCardId as any] : []),
       salesman: body.salesman || 'GENERAL',
       partyName: body.partyName?.trim(),
       phone: body.phone?.trim(),
@@ -341,11 +350,24 @@ saleRouter.post(
       cashPaid: num(body.cashPaid),
       cardPaid: num(body.cardPaid),
       bankPaid: num(body.bankPaid),
+      status: body.isReturn ? 'return' : 'closed',
     });
 
-    if (body.jobCardId) {
-      const jc = await JobCard.findById(body.jobCardId);
-      if (jc) {
+    const linkedJcIds: string[] = Array.from(
+      new Set(
+        [
+          ...(Array.isArray(body.jobCardIds) ? body.jobCardIds : []),
+          ...(body.jobCardId ? [body.jobCardId] : []),
+        ].filter(Boolean),
+      ),
+    );
+
+    if (linkedJcIds.length > 0) {
+      let latestStatus: string | undefined = undefined;
+      for (const jcId of linkedJcIds) {
+        const jc = await JobCard.findById(jcId);
+        if (!jc) continue;
+
         if (Array.isArray(body.items) && Array.isArray(jc.items)) {
           for (const soldItem of body.items) {
             if (soldItem.code === 'EXTRA' || soldItem.productName === 'Additional Charges') {
@@ -373,7 +395,7 @@ saleRouter.post(
 
           // Cross-reference all linked sales for this order to ensure all sold items are invoiced
           const linkedSales = await Sale.find({
-            $or: [{ jobCardId: jc._id }, { jobCardRef: jc.ref }],
+            $or: [{ jobCardId: jc._id }, { jobCardIds: jc._id }, { jobCardRef: jc.ref }],
           }).lean();
           const allSoldItems: any[] = linkedSales.flatMap((s: any) =>
             (s.items || []).map((it: any) => ({ ...it, billNo: s.billNo })),
@@ -422,8 +444,11 @@ saleRouter.post(
           jc.invoiceNo = jc.invoiceNo ? `${jc.invoiceNo}, ${billNo}` : String(billNo);
         }
         await jc.save();
+        latestStatus = jc.status;
+      }
 
-        sale.orderStatus = jc.status;
+      if (latestStatus) {
+        sale.orderStatus = latestStatus;
         await sale.save();
       }
     }
@@ -440,10 +465,14 @@ saleRouter.get(
     const sale: any = await Sale.findById(req.params.id).lean();
     if (!sale) throw new HttpError(404, 'Sale not found');
     let orderStatus = sale.orderStatus;
-    if (!orderStatus && (sale.jobCardId || sale.jobCardRef)) {
+    const saleJcIds = [
+      ...(sale.jobCardId ? [sale.jobCardId] : []),
+      ...(Array.isArray(sale.jobCardIds) ? sale.jobCardIds : []),
+    ];
+    if (!orderStatus && (saleJcIds.length > 0 || sale.jobCardRef)) {
       const jc: any = await JobCard.findOne({
         $or: [
-          ...(sale.jobCardId ? [{ _id: sale.jobCardId }] : []),
+          ...(saleJcIds.length > 0 ? [{ _id: { $in: saleJcIds } }] : []),
           ...(sale.jobCardRef ? [{ ref: sale.jobCardRef }] : []),
         ],
       })
@@ -451,7 +480,168 @@ saleRouter.get(
         .lean();
       if (jc) orderStatus = jc.status;
     }
-    res.json({ ...sale, orderStatus });
+    const status = sale.isDeleted || sale.status === 'cancelled'
+      ? 'deleted'
+      : sale.isReturn
+        ? 'return'
+        : 'closed';
+    res.json({ ...sale, status, orderStatus });
+  }),
+);
+
+// PUT /sales/:id -> edit an existing sale / return
+saleRouter.put(
+  '/:id',
+  requirePerm('sales.create'),
+  asyncHandler(async (req, res) => {
+    const sale = await Sale.findById(req.params.id);
+    if (!sale) throw new HttpError(404, 'Invoice not found');
+    if (sale.isDeleted) throw new HttpError(400, 'Cannot edit a deleted invoice');
+
+    const body = (req.body ?? {}) as SaleBody;
+    const defaultTax =
+      body.defaultTaxPercent !== undefined
+        ? num(body.defaultTaxPercent, DEFAULT_TAX_RATE)
+        : DEFAULT_TAX_RATE;
+    const taxPercent = defaultTax;
+
+    const base = (body.items ?? [])
+      .filter((i) => i && (i.code || i.productName || num(i.qty) || num(i.rate)))
+      .map((i) => {
+        const qty = num(i.qty);
+        const rate = num(i.rate);
+        const gross = r2(qty * rate);
+        const input = num(i.discInput, num(i.discPercent));
+        const discAmt =
+          i.discType === 'percent' ? r2((gross * input) / 100) : r2(Math.min(input, gross));
+        const grossAmt = r2(gross - discAmt);
+        return {
+          code: i.code || '',
+          productName: i.productName || '',
+          unit: i.unit || '',
+          qty,
+          rate,
+          discType: i.discType === 'percent' ? ('percent' as const) : ('fixed' as const),
+          discInput: input,
+          discPercent: gross ? r2((discAmt / gross) * 100) : 0,
+          discAmt,
+          grossAmt,
+          warranty: num(i.warranty),
+          info: (i.info ?? '').trim(),
+          completed: Boolean(i.completed),
+          status: i.status || 'ready',
+        };
+      });
+
+    if (base.length === 0) throw new HttpError(400, 'At least one item is required');
+
+    const totQty = r2(base.reduce((s, i) => s + i.qty, 0));
+    const grossAmount = r2(base.reduce((s, i) => s + i.grossAmt, 0));
+    const lineDisc = r2(base.reduce((s, i) => s + i.discAmt, 0));
+
+    const extraInput = num(body.additionalChargesInput, num(body.additionalCharges));
+    const additionalCharges =
+      body.additionalChargesType === 'percent'
+        ? r2((grossAmount * extraInput) / 100)
+        : r2(extraInput);
+
+    const discountInput = r2(num(body.discountInput, num(body.additionalDiscount)));
+    const additionalDiscount =
+      body.discountType === 'percent'
+        ? r2((grossAmount * discountInput) / 100)
+        : r2(Math.min(discountInput, grossAmount + additionalCharges));
+    const discountAmt = r2(lineDisc + additionalDiscount);
+    const taxable = Math.max(r2(grossAmount + additionalCharges - additionalDiscount), 0);
+    const taxAmt = r2((taxable * taxPercent) / 100);
+    const freight = r2(num(body.freight));
+    const netAmount = r2(taxable + taxAmt + freight);
+    const advanceAmount = r2(num(body.advanceAmount));
+
+    const keep = grossAmount > 0 ? taxable / grossAmount : 0;
+    const items = base.map((i) => {
+      const lineTaxable = r2(i.grossAmt * keep);
+      const lineTax = r2((lineTaxable * taxPercent) / 100);
+      const itemNet = r2(i.grossAmt + lineTax);
+      return {
+        ...i,
+        netRate: i.qty ? r2(itemNet / i.qty) : 0,
+        taxPercent,
+        taxAmt: lineTax,
+        netAmount: itemNet,
+      };
+    });
+
+    const materialsUsed = (body.materialsUsed ?? [])
+      .filter((m) => m && (m.code || m.productName || num(m.qty) || num(m.rate)))
+      .map((m) => ({
+        code: m.code || '',
+        productName: m.productName || '',
+        qty: num(m.qty),
+        rate: num(m.rate),
+      }));
+    const materialTotal = num(
+      body.materialTotal,
+      r2(materialsUsed.reduce((s, m) => s + m.qty * m.rate, 0)),
+    );
+
+    sale.billDate = body.billDate ? new Date(body.billDate) : sale.billDate;
+    sale.saleType = body.saleType || sale.saleType;
+    sale.paymentType = body.paymentType || sale.paymentType;
+    sale.category = body.category || sale.category;
+    sale.creditCardNo = body.creditCardNo;
+    sale.jobCardRef = body.jobCardRef?.trim();
+    sale.jobCardId = body.jobCardId ? (body.jobCardId as any) : sale.jobCardId;
+    if (Array.isArray(body.jobCardIds)) {
+      sale.jobCardIds = body.jobCardIds as any;
+    }
+    sale.salesman = body.salesman || sale.salesman;
+    sale.partyName = body.partyName?.trim() ?? sale.partyName;
+    sale.phone = body.phone?.trim() ?? sale.phone;
+    sale.ledgerId = body.ledgerId ? (body.ledgerId as any) : sale.ledgerId;
+    sale.delDate = body.delDate ? new Date(body.delDate) : sale.delDate;
+    sale.landmark = body.landmark;
+    sale.trn = body.trn;
+    sale.vehicleNo = body.vehicleNo;
+    sale.bookingNo = body.bookingNo?.trim() || sale.bookingNo;
+    sale.refNo = body.refNo?.trim() || sale.refNo;
+    sale.items = items as any;
+    sale.materialsUsed = materialsUsed;
+    sale.materialTotal = materialTotal;
+    sale.totQty = totQty;
+    sale.grossAmount = grossAmount;
+    sale.discountAmt = discountAmt;
+    sale.additionalDiscount = additionalDiscount;
+    sale.additionalCharges = additionalCharges;
+    sale.additionalChargesType = body.additionalChargesType === 'percent' ? 'percent' : 'fixed';
+    sale.additionalChargesInput = extraInput;
+    sale.discountType = body.discountType === 'percent' ? 'percent' : 'fixed';
+    sale.discountInput = discountInput;
+    sale.taxAmt = taxAmt;
+    sale.freight = freight;
+    sale.advanceAmount = advanceAmount;
+    sale.netAmount = netAmount;
+    sale.balance = r2(Math.max(netAmount - advanceAmount, 0));
+    sale.changeReturn = r2(Math.max(advanceAmount - netAmount, 0));
+    if (body.isReturn !== undefined) {
+      sale.isReturn = !!body.isReturn;
+      sale.status = body.isReturn ? 'return' : 'closed';
+    }
+    sale.paymentMethod = body.paymentMethod || body.paymentType || sale.paymentMethod;
+    sale.paymentAccount = body.paymentAccount?.trim();
+    sale.paymentNote = body.paymentNote?.trim();
+    sale.cardHolder = body.cardHolder?.trim();
+    sale.cardLast4 = body.cardLast4?.replace(/\D/g, '').slice(-4);
+    sale.cardExpiry = body.cardExpiry?.trim();
+    sale.bankName = body.bankName?.trim();
+    sale.accountName = body.accountName?.trim();
+    sale.iban = body.iban?.trim();
+    sale.swift = body.swift?.trim();
+    sale.cashPaid = num(body.cashPaid);
+    sale.cardPaid = num(body.cardPaid);
+    sale.bankPaid = num(body.bankPaid);
+
+    await sale.save();
+    res.json(sale);
   }),
 );
 
@@ -471,14 +661,23 @@ saleRouter.delete(
     await existing.save();
 
     // If linked to a job card, revert invoiced status on matching items
-    if (existing.jobCardId || existing.jobCardRef) {
-      const jc = await JobCard.findOne({
+    const linkedIds: string[] = Array.from(
+      new Set(
+        [
+          ...(Array.isArray(existing.jobCardIds) ? existing.jobCardIds.map(String) : []),
+          ...(existing.jobCardId ? [String(existing.jobCardId)] : []),
+        ].filter(Boolean),
+      ),
+    );
+
+    if (linkedIds.length > 0 || existing.jobCardRef) {
+      const jobCards = await JobCard.find({
         $or: [
-          ...(existing.jobCardId ? [{ _id: existing.jobCardId }] : []),
+          ...(linkedIds.length > 0 ? [{ _id: { $in: linkedIds } }] : []),
           ...(existing.jobCardRef ? [{ ref: existing.jobCardRef }] : []),
         ],
       });
-      if (jc) {
+      for (const jc of jobCards) {
         if (Array.isArray(jc.items)) {
           for (const it of jc.items) {
             if (it.invoiceNo === String(existing.billNo)) {

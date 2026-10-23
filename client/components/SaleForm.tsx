@@ -82,7 +82,15 @@ function stamp(d = new Date()): string {
   return `${p(d.getDate())}/${p(d.getMonth() + 1)}/${d.getFullYear()} ${p(h)}:${p(d.getMinutes())} ${ampm}`;
 }
 
-export function SaleForm() {
+export function SaleForm({
+  initial,
+  mode = 'new',
+  onDone,
+}: {
+  initial?: Sale | null;
+  mode?: 'new' | 'edit';
+  onDone?: () => void;
+} = {}) {
   const { can } = useAuth();
   const canCreate = can('sales.create');
   const canAddLedger = can('ledgers.manage');
@@ -93,46 +101,129 @@ export function SaleForm() {
   const { settings } = useSettings();
   const taxRate = settings.taxRate;
 
-  const [billNo, setBillNo] = useState<number | null>(null);
-  const [billDate] = useState(todayISO());
-  const [saleStamp] = useState(() => stamp());
+  const [billNo, setBillNo] = useState<number | null>(
+    mode === 'edit' ? (initial?.billNo ?? null) : null,
+  );
+  const [billDate] = useState(
+    mode === 'edit' && initial?.billDate ? toISODate(initial.billDate) : todayISO(),
+  );
+  const [saleStamp] = useState(() =>
+    mode === 'edit' && initial?.billDate ? stamp(new Date(initial.billDate)) : stamp(),
+  );
 
-  const [partyName, setPartyName] = useState('');
-  const [phone, setPhone] = useState('');
-  const [ledgerId, setLedgerId] = useState('');
+  const [partyName, setPartyName] = useState(initial?.partyName ?? '');
+  const [phone, setPhone] = useState(initial?.phone ?? '');
+  const [ledgerId, setLedgerId] = useState(initial?.ledgerId ?? '');
   const [due, setDue] = useState<LedgerDue | null>(null);
   const [savedCards, setSavedCards] = useState<SavedCard[]>([]);
   const [savedBanks, setSavedBanks] = useState<SavedBank[]>([]);
 
-  const [bookingNo, setBookingNo] = useState('');
-  const [refNo, setRefNo] = useState('');
-  const [jobCardId, setJobCardId] = useState('');
-  const [orderNo, setOrderNo] = useState<number | null>(null);
+  const [bookingNo, setBookingNo] = useState(initial?.bookingNo ?? '');
+  const [refNo, setRefNo] = useState(initial?.refNo ?? '');
+  const [jobCardId, setJobCardId] = useState(initial?.jobCardId ?? '');
+  const [jobCardIds, setJobCardIds] = useState<string[]>(
+    initial?.jobCardIds ?? (initial?.jobCardId ? [initial.jobCardId] : []),
+  );
+  const [orderNo, setOrderNo] = useState<number | null>(
+    initial?.bookingNo ? num(initial.bookingNo) : null,
+  );
   const [orderDate, setOrderDate] = useState('');
-  const [deliveryDate, setDeliveryDate] = useState('');
+  const [deliveryDate, setDeliveryDate] = useState(
+    initial?.delDate ? toISODate(initial.delDate) : '',
+  );
 
-  const [rows, setRows] = useState<SaleRow[]>([emptyRow()]);
-  const [pendingOrderItems, setPendingOrderItems] = useState<SaleRow[]>([]);
-  const [materials, setMaterials] = useState<MaterialRow[]>([emptyMaterialRow()]);
-
-  const [discountType, setDiscountType] = useState<'percent' | 'fixed'>('fixed');
-  const [discountInput, setDiscountInput] = useState('0');
-  const [additionalChargesType, setAdditionalChargesType] = useState<'percent' | 'fixed'>('fixed');
-  const [additionalChargesInput, setAdditionalChargesInput] = useState('0');
-  const [advanceBreakdown, setAdvanceBreakdown] = useState<Record<TenderMode, number>>({
-    cash: 0,
-    card: 0,
-    bank: 0,
+  const [rows, setRows] = useState<SaleRow[]>(() => {
+    if (mode === 'edit' && initial?.items?.length) {
+      return initial.items.map((i) => ({
+        code: i.code ?? '',
+        productName: i.productName ?? '',
+        unit: i.unit || 'PIECE',
+        stockQty: 0,
+        qty: String(i.qty ?? '1'),
+        rate: String(i.rate ?? ''),
+        discType: i.discType || 'fixed',
+        discInput: String(i.discInput ?? '0'),
+        warranty: String(i.warranty ?? '0'),
+        info: i.info ?? '',
+        completed: i.completed,
+        status: i.status || 'ready',
+      }));
+    }
+    return [emptyRow()];
   });
+  const [pendingOrderItems, setPendingOrderItems] = useState<SaleRow[]>([]);
+  const [materials, setMaterials] = useState<MaterialRow[]>(() => {
+    if (mode === 'edit' && initial?.materialsUsed?.length) {
+      return initial.materialsUsed.map((m) => ({
+        code: m.code ?? '',
+        productName: m.productName ?? '',
+        qty: String(m.qty ?? '1'),
+        rate: String(m.rate ?? '0'),
+      }));
+    }
+    return [emptyMaterialRow()];
+  });
+
+  const [discountType, setDiscountType] = useState<'percent' | 'fixed'>(
+    initial?.discountType || 'fixed',
+  );
+  const [discountInput, setDiscountInput] = useState(
+    String(initial?.discountInput ?? initial?.additionalDiscount ?? '0'),
+  );
+  const [additionalChargesType, setAdditionalChargesType] = useState<'percent' | 'fixed'>(
+    initial?.additionalChargesType || 'fixed',
+  );
+  const [additionalChargesInput, setAdditionalChargesInput] = useState(
+    String(initial?.additionalChargesInput ?? initial?.additionalCharges ?? '0'),
+  );
+  const [advanceBreakdown, setAdvanceBreakdown] = useState<Record<TenderMode, number>>(() => ({
+    cash: initial?.cashPaid ?? 0,
+    card: initial?.cardPaid ?? 0,
+    bank: initial?.bankPaid ?? 0,
+  }));
   const advancePaid = useMemo(
     () => r2(advanceBreakdown.cash + advanceBreakdown.card + advanceBreakdown.bank),
     [advanceBreakdown],
   );
 
-  const [split, setSplit] = useState<Split>(emptySplit);
-  const [tenderDetails, setTenderDetails] = useState<TenderDetails>(emptyDetails);
+  const [split, setSplit] = useState<Split>(() => {
+    if (mode === 'edit' && initial) {
+      return {
+        cash: initial.cashPaid
+          ? String(initial.cashPaid)
+          : initial.paymentMethod === 'cash' && initial.advanceAmount
+            ? String(initial.advanceAmount)
+            : '',
+        card: initial.cardPaid
+          ? String(initial.cardPaid)
+          : initial.paymentMethod === 'card' && initial.advanceAmount
+            ? String(initial.advanceAmount)
+            : '',
+        bank: initial.bankPaid
+          ? String(initial.bankPaid)
+          : initial.paymentMethod === 'bank' && initial.advanceAmount
+            ? String(initial.advanceAmount)
+            : '',
+      };
+    }
+    return emptySplit();
+  });
+  const [tenderDetails, setTenderDetails] = useState<TenderDetails>(() => ({
+    card: {
+      holder: initial?.cardHolder ?? '',
+      number: initial?.cardLast4 ? `•••• ${initial.cardLast4}` : '',
+      expiry: initial?.cardExpiry ?? '',
+      cvc: '',
+    },
+    bank: {
+      bankName: initial?.bankName ?? '',
+      accountName: initial?.accountName ?? '',
+      iban: initial?.iban ?? '',
+      swift: initial?.swift ?? '',
+    },
+  }));
 
-  const [isReturn, setIsReturn] = useState(false);
+  const [isReturn, setIsReturn] = useState(Boolean(initial?.isReturn));
   const [saving, setSaving] = useState(false);
   const [ledgerOpen, setLedgerOpen] = useState(false);
   const [infoRow, setInfoRow] = useState(-1);
@@ -145,6 +236,20 @@ export function SaleForm() {
   const [hasSearched, setHasSearched] = useState(false);
   const [updatingStatusId, setUpdatingStatusId] = useState<string | null>(null);
   const [activeActionId, setActiveActionId] = useState<string | null>(null);
+  const [selectedJcIds, setSelectedJcIds] = useState<string[]>([]);
+
+  const selectedJobs = useMemo(
+    () => jcRows.filter((j) => selectedJcIds.includes(j._id)),
+    [jcRows, selectedJcIds],
+  );
+  const selectedNetTotal = useMemo(
+    () => r2(selectedJobs.reduce((s, j) => s + (j.netAmount || 0), 0)),
+    [selectedJobs],
+  );
+  const selectedAdvTotal = useMemo(
+    () => r2(selectedJobs.reduce((s, j) => s + (j.advance || 0), 0)),
+    [selectedJobs],
+  );
 
   const hasCompleted = useMemo(() => rows.some((r) => r.completed === true), [rows]);
 
@@ -164,24 +269,10 @@ export function SaleForm() {
     const charged = rows.filter((r) => r.code?.trim() || r.productName?.trim() || num(r.rate) > 0);
     const readyCount = charged.length;
     const readyTotal = r2(lines.reduce((s, l) => s + l.subtotal, 0));
-    const pendingCount = pendingOrderItems.length;
-    const pendingTotal = r2(
-      pendingOrderItems.reduce((s, p) => {
-        const q = num(p.qty) || 1;
-        const rt = num(p.rate);
-        const gross = q * rt;
-        const input = num(p.discInput);
-        const discAmt = p.discType === 'percent' ? (gross * input) / 100 : Math.min(input, gross);
-        return s + (gross - discAmt);
-      }, 0),
-    );
 
-    const total = r2(readyTotal + pendingTotal);
-    const itemCount = charged.length + pendingCount;
-    const qtyCount = r2(
-      lines.reduce((s, l) => s + l.qty, 0) +
-        pendingOrderItems.reduce((s, p) => s + (num(p.qty) || 1), 0),
-    );
+    const total = r2(readyTotal);
+    const itemCount = charged.length;
+    const qtyCount = r2(lines.reduce((s, l) => s + l.qty, 0));
 
     const extraIn = num(additionalChargesInput);
     const extra =
@@ -212,9 +303,9 @@ export function SaleForm() {
       itemCount,
       qtyCount,
       readyCount,
-      pendingCount,
+      pendingCount: 0,
       readyTotal,
-      pendingTotal,
+      pendingTotal: 0,
       allProductsTotal: total,
       total,
       additionalCharges: extra,
@@ -235,7 +326,6 @@ export function SaleForm() {
     };
   }, [
     rows,
-    pendingOrderItems,
     discountType,
     discountInput,
     additionalChargesType,
@@ -263,11 +353,12 @@ export function SaleForm() {
   /* --------------------------------------------------------------- setup */
 
   useEffect(() => {
+    if (mode === 'edit') return;
     api.sales
       .next()
       .then((r) => setBillNo(r.billNo))
       .catch(() => setBillNo(null));
-  }, []);
+  }, [mode]);
 
   const loadDue = useCallback(async () => {
     if (!ledgerId) {
@@ -348,6 +439,7 @@ export function SaleForm() {
     const lid = ledgerIdOverride !== undefined ? ledgerIdOverride : (isSameParty ? ledgerId : '');
     setSearching(true);
     setHasSearched(true);
+    setSelectedJcIds([]);
     try {
       if (isReturn) {
         const [salesRes, jcRes] = await Promise.all([
@@ -370,6 +462,7 @@ export function SaleForm() {
 
   function handleOpenFindModal() {
     setActiveActionId(null);
+    setSelectedJcIds([]);
     const book = bookingNo?.trim() || '';
     const custName = partyName?.trim() || '';
     const initialQuery = book || custName || '';
@@ -382,6 +475,52 @@ export function SaleForm() {
       setHasSearched(false);
       setJcRows([]);
       setSaleRows([]);
+    }
+  }
+
+  function handleToggleSelect(order: JobCard) {
+    setSelectedJcIds((prev) => {
+      if (prev.includes(order._id)) {
+        return prev.filter((id) => id !== order._id);
+      }
+      const firstSelected = jcRows.find((r) => prev.includes(r._id));
+      if (
+        firstSelected &&
+        order.partyName &&
+        firstSelected.partyName &&
+        order.partyName.trim().toLowerCase() !== firstSelected.partyName.trim().toLowerCase()
+      ) {
+        toast(
+          `Selected orders must belong to the same customer (${firstSelected.partyName})`,
+          'warning',
+        );
+        return prev;
+      }
+      return [...prev, order._id];
+    });
+  }
+
+  function handleSelectAll(checked: boolean) {
+    if (!checked) {
+      setSelectedJcIds([]);
+      return;
+    }
+    if (jcRows.length === 0) return;
+    const firstCustomer = (jcRows[0].partyName || '').trim().toLowerCase();
+    const hasDifferentCustomer = jcRows.some(
+      (r) => (r.partyName || '').trim().toLowerCase() !== firstCustomer,
+    );
+    if (hasDifferentCustomer) {
+      const matchingIds = jcRows
+        .filter((r) => (r.partyName || '').trim().toLowerCase() === firstCustomer)
+        .map((r) => r._id);
+      setSelectedJcIds(matchingIds);
+      toast(
+        `Selected ${matchingIds.length} orders for customer "${jcRows[0].partyName}"`,
+        'info',
+      );
+    } else {
+      setSelectedJcIds(jcRows.map((r) => r._id));
     }
   }
 
@@ -458,142 +597,183 @@ export function SaleForm() {
     [toast],
   );
 
-  const convertFrom = useCallback(
-    async (rawJ: JobCard) => {
-      let j = rawJ;
-      if (rawJ._id) {
-        try {
-          j = await api.jobCards.get(rawJ._id);
-        } catch {
-          j = rawJ;
-        }
-      }
+  const convertMultiple = useCallback(
+    async (rawJobs: JobCard[]) => {
+      if (!rawJobs || rawJobs.length === 0) return;
 
-      // 1. Filter out items that were already invoiced
-      const uninvoiced = (j.items || []).filter((i) => !i.invoiced);
-      if (uninvoiced.length === 0) {
+      // 1. Fetch full details for all selected job cards
+      const fullJobs: JobCard[] = await Promise.all(
+        rawJobs.map(async (rj) => {
+          if (rj._id) {
+            try {
+              return await api.jobCards.get(rj._id);
+            } catch {
+              return rj;
+            }
+          }
+          return rj;
+        }),
+      );
+
+      // Check if any uninvoiced items exist across selected orders
+      const jobsWithUninvoiced = fullJobs.filter((j) => (j.items || []).some((i) => !i.invoiced));
+      if (jobsWithUninvoiced.length === 0) {
         setJcOpen(false);
-        toast(`Order ${j.ref || j.no} has already been fully invoiced.`, 'warning');
+        setSelectedJcIds([]);
+        toast('Selected order(s) have already been fully invoiced.', 'warning');
         return;
       }
 
-      const orderBookNo = j.bookNo != null ? String(j.bookNo) : (j.no != null ? String(j.no) : '');
-      const orderRefNo = j.ref || (j.no != null ? `Ref-${j.no}` : '');
-      setBookingNo(orderBookNo);
-      setRefNo(orderRefNo);
-      setJobCardId(j._id);
-      setOrderNo(j.no ?? null);
-      setOrderDate(j.date ? toISODate(j.date) : '');
-      setDeliveryDate(j.deliveryDate ? toISODate(j.deliveryDate) : '');
-      setPartyName(j.partyName ?? '');
-      setPhone(j.phone ?? '');
-      setLedgerId(j.ledgerId ?? '');
+      // Party details from the first job that has party info
+      const primaryJob = fullJobs.find((j) => j.partyName || j.phone || j.ledgerId) || fullJobs[0];
+      setPartyName(primaryJob.partyName ?? '');
+      setPhone(primaryJob.phone ?? '');
+      setLedgerId(primaryJob.ledgerId ?? '');
 
-      const availAdv = j.remainingAdvance !== undefined ? num(j.remainingAdvance) : num(j.advance);
-      const bd: Record<TenderMode, number> = { cash: 0, card: 0, bank: 0 };
-      if (availAdv > 0) {
-        if (j.payments && j.payments.length > 0) {
-          let left = availAdv;
-          for (const p of j.payments) {
-            if (left <= 0) break;
-            const m = (p.mode === 'credit' ? 'cash' : p.mode) as TenderMode;
-            if (m in bd) {
-              const take = Math.min(left, num(p.amount));
-              bd[m] = r2(bd[m] + take);
-              left = r2(left - take);
-            }
-          }
-          if (left > 0) {
-            bd.cash = r2(bd.cash + left);
-          }
-        } else {
-          const m = ((j.paymentMode as TenderMode) || 'cash');
-          if (m in bd) {
-            bd[m] = r2(availAdv);
-          }
-        }
-      }
-      setAdvanceBreakdown(bd);
+      // Combine booking numbers: e.g. "4, 3, 2"
+      const allBookNos = [
+        ...new Set(
+          fullJobs
+            .map((j) => (j.bookNo != null ? String(j.bookNo) : j.no != null ? String(j.no) : ''))
+            .filter(Boolean),
+        ),
+      ];
+      setBookingNo(allBookNos.join(', '));
 
-      const allItems = j.items || [];
-      const hasAnyCompleted = allItems.some((i) => Boolean(i.completed));
+      // Combine ref numbers: e.g. "Ref-13262, Ref-13261"
+      const allRefs = [
+        ...new Set(
+          fullJobs.map((j) => j.ref || (j.no != null ? `Ref-${j.no}` : '')).filter(Boolean),
+        ),
+      ];
+      setRefNo(allRefs.join(', '));
 
-      // Only items that are ready to be delivered right now are shown in the table
-      const readyToDisplay = allItems.filter(
-        (i) => !i.invoiced && (hasAnyCompleted ? Boolean(i.completed) : true),
-      );
+      // Set jobCardId and jobCardIds
+      const allIds = fullJobs.map((j) => j._id).filter(Boolean);
+      setJobCardId(allIds[0] || '');
+      setJobCardIds(allIds);
 
-      const readyRows: SaleRow[] = [];
-      if (readyToDisplay.length > 0) {
-        readyRows.push(
-          ...readyToDisplay.map((i) => ({
-            ...emptyRow(),
-            code: i.code ?? '',
-            productName: i.productName ?? '',
-            qty: String(i.qty),
-            rate: String(i.rate),
-            info: '',
-            completed: true,
-            status: 'ready' as const,
-          })),
-        );
-      }
-      const isFirstBill = !j.invoiceNo;
-      if (isFirstBill && num(j.additionalCharges) > 0) {
-        readyRows.push({
-          ...emptyRow(),
-          code: 'EXTRA',
-          productName: 'Additional Charges',
-          qty: '1',
-          rate: String(j.additionalCharges),
-          completed: true,
-          status: 'ready',
+      setOrderNo(primaryJob.no ?? null);
+      setOrderDate(primaryJob.date ? toISODate(primaryJob.date) : '');
+      setDeliveryDate(primaryJob.deliveryDate ? toISODate(primaryJob.deliveryDate) : '');
+
+      // 1. Collect ONLY completed items that are NOT already invoiced:
+      const combinedReadyRows: SaleRow[] = [];
+      const isMulti = fullJobs.length > 1;
+
+      for (const j of fullJobs) {
+        const bNo = j.bookNo != null ? j.bookNo : j.no;
+        const allItems = j.items || [];
+        const isReadyOrder = j.status === 'ready';
+
+        // STRICT FILTER:
+        // - Already invoiced items (i.invoiced || i.invoiceNo) must NEVER be included.
+        // - For partially ready orders (or open), ONLY items with i.completed === true are included (uncomplete items are excluded).
+        // - For ready orders, all uninvoiced items (completed !== false) are included.
+        const readyToDisplay = allItems.filter((i) => {
+          if (i.invoiced || i.invoiceNo) return false;
+          if (isReadyOrder) return i.completed !== false;
+          return Boolean(i.completed);
         });
-      }
-      if (readyRows.length > 0) {
-        setRows(readyRows);
-      } else {
-        setRows([emptyRow()]);
+
+        if (readyToDisplay.length > 0) {
+          combinedReadyRows.push(
+            ...readyToDisplay.map((i) => {
+              const prefix = isMulti && bNo != null ? `Book #${bNo}: ` : '';
+              return {
+                ...emptyRow(),
+                code: i.code ?? '',
+                productName: i.productName ?? '',
+                qty: String(i.qty),
+                rate: String(i.rate),
+                info: prefix + (i.personUid ? `(${i.personUid})` : ''),
+                completed: true,
+                status: 'ready' as const,
+              };
+            }),
+          );
+        }
+
+        const isFirstBill = !j.invoiceNo;
+        if (isFirstBill && num(j.additionalCharges) > 0) {
+          combinedReadyRows.push({
+            ...emptyRow(),
+            code: 'EXTRA',
+            productName: isMulti && bNo != null ? `Additional Charges (Book #${bNo})` : 'Additional Charges',
+            qty: '1',
+            rate: String(j.additionalCharges),
+            completed: true,
+            status: 'ready',
+          });
+        }
       }
 
-      // All other items belonging to this order (prior invoiced or pending stitching)
-      // Hidden from the table, but preserved so that the order's full total amount is displayed
-      const otherOrderItems = allItems.filter((i) => !readyToDisplay.includes(i));
-      const pendingRows: SaleRow[] = otherOrderItems.map((i) => ({
-        ...emptyRow(),
-        code: i.code ?? '',
-        productName: i.productName ?? '',
-        qty: String(i.qty),
-        rate: String(i.rate),
-        info: '',
-        completed: false,
-        status: 'pending' as const,
-      }));
-      setPendingOrderItems(pendingRows);
+      if (combinedReadyRows.length === 0) {
+        setJcOpen(false);
+        setSelectedJcIds([]);
+        toast(
+          'Selected order(s) have no completed items ready to invoice. Uncomplete and already invoiced items cannot be billed.',
+          'warning',
+        );
+        return;
+      }
 
-      toast(
-        `Loaded order ${orderRefNo}: ${readyRows.length} ready item(s) (Order Total: ${fmt(j.netAmount || 0)} AED)`,
-        'info',
+      setRows(combinedReadyRows);
+      setPendingOrderItems([]);
+
+      // 2. Calculate approximate bill total for ready items to cap advance if unfinished items remain
+      const readyGrossTotal = combinedReadyRows.reduce(
+        (s, r) => s + num(r.qty) * num(r.rate),
+        0,
+      );
+      const readyPayableApprox = r2(readyGrossTotal * (1 + taxRate / 100));
+
+      const hasUnfinishedItems = fullJobs.some((j) =>
+        (j.items || []).some((i) => !i.invoiced && !i.completed),
       );
 
-      // Load materials used from the job card only on the first bill
-      const loadedMaterials: MaterialRow[] = [];
-      if (isFirstBill) {
-        if (j.materialsUsed && j.materialsUsed.length > 0) {
-          for (const m of j.materialsUsed) {
-            if (m.code || m.productName || num(m.qty) || num(m.rate)) {
-              loadedMaterials.push({
-                code: m.code ?? '',
-                productName: m.productName ?? '',
-                qty: String(m.qty ?? 1),
-                rate: String(m.rate ?? 0),
-              });
+      let remainingAdvanceCapacity = hasUnfinishedItems && readyPayableApprox > 0
+        ? readyPayableApprox
+        : Infinity;
+
+      // Combine Advance Breakdown
+      const combinedBd: Record<TenderMode, number> = { cash: 0, card: 0, bank: 0 };
+      for (const j of fullJobs) {
+        const availAdv = j.remainingAdvance !== undefined ? num(j.remainingAdvance) : num(j.advance);
+        if (availAdv > 0 && remainingAdvanceCapacity > 0) {
+          const advToUse = Math.min(availAdv, remainingAdvanceCapacity);
+          remainingAdvanceCapacity = r2(remainingAdvanceCapacity - advToUse);
+
+          if (j.payments && j.payments.length > 0) {
+            let left = advToUse;
+            for (const p of j.payments) {
+              if (left <= 0) break;
+              const m = (p.mode === 'credit' ? 'cash' : p.mode) as TenderMode;
+              if (m in combinedBd) {
+                const take = Math.min(left, num(p.amount));
+                combinedBd[m] = r2(combinedBd[m] + take);
+                left = r2(left - take);
+              }
+            }
+            if (left > 0) {
+              combinedBd.cash = r2(combinedBd.cash + left);
+            }
+          } else {
+            const m = ((j.paymentMode as TenderMode) || 'cash');
+            if (m in combinedBd) {
+              combinedBd[m] = r2(combinedBd[m] + advToUse);
             }
           }
         }
-        if (j.measurementSets && j.measurementSets.length > 0) {
-          for (const set of j.measurementSets) {
-            for (const m of set.materials ?? []) {
+      }
+      setAdvanceBreakdown(combinedBd);
+
+      // Load materials used from all job cards (for first bill of each)
+      const loadedMaterials: MaterialRow[] = [];
+      for (const j of fullJobs) {
+        if (!j.invoiceNo) {
+          if (j.materialsUsed && j.materialsUsed.length > 0) {
+            for (const m of j.materialsUsed) {
               if (m.code || m.productName || num(m.qty) || num(m.rate)) {
                 loadedMaterials.push({
                   code: m.code ?? '',
@@ -601,6 +781,20 @@ export function SaleForm() {
                   qty: String(m.qty ?? 1),
                   rate: String(m.rate ?? 0),
                 });
+              }
+            }
+          }
+          if (j.measurementSets && j.measurementSets.length > 0) {
+            for (const set of j.measurementSets) {
+              for (const m of set.materials ?? []) {
+                if (m.code || m.productName || num(m.qty) || num(m.rate)) {
+                  loadedMaterials.push({
+                    code: m.code ?? '',
+                    productName: m.productName ?? '',
+                    qty: String(m.qty ?? 1),
+                    rate: String(m.rate ?? 0),
+                  });
+                }
               }
             }
           }
@@ -612,31 +806,61 @@ export function SaleForm() {
         setMaterials([emptyMaterialRow()]);
       }
 
-      if (j.additionalCharges || (j as any).additionalChargesInput) {
-        setAdditionalChargesType((j as any).additionalChargesType || 'fixed');
-        setAdditionalChargesInput(String((j as any).additionalChargesInput ?? j.additionalCharges));
+      // If single job, handle its additionalChargesInput & discountInput
+      if (fullJobs.length === 1) {
+        const j = fullJobs[0];
+        if (j.additionalCharges || (j as any).additionalChargesInput) {
+          setAdditionalChargesType((j as any).additionalChargesType || 'fixed');
+          setAdditionalChargesInput(String((j as any).additionalChargesInput ?? j.additionalCharges));
+        }
+        if (j.discount || (j as any).discountInput) {
+          setDiscountType((j as any).discountType || 'fixed');
+          setDiscountInput(String((j as any).discountInput ?? j.discount));
+        }
+      } else {
+        // Multi orders: sum total fixed discounts if any
+        const totalDiscount = fullJobs.reduce((s, j) => s + num(j.discount || (j as any).discountInput || 0), 0);
+        if (totalDiscount > 0) {
+          setDiscountType('fixed');
+          setDiscountInput(String(totalDiscount));
+        }
       }
 
-      if (j.discount || (j as any).discountInput) {
-        setDiscountType((j as any).discountType || 'fixed');
-        setDiscountInput(String((j as any).discountInput ?? j.discount));
-      }
-      if (j.ledgerId) {
+      if (primaryJob.ledgerId) {
         try {
-          const l = await api.ledgers.get(j.ledgerId);
+          const l = await api.ledgers.get(primaryJob.ledgerId);
           pickLedger(l);
-          if (j.partyName) setPartyName(j.partyName);
-          if (j.phone) setPhone(j.phone);
+          if (primaryJob.partyName) setPartyName(primaryJob.partyName);
+          if (primaryJob.phone) setPhone(primaryJob.phone);
         } catch {
           /* ignore */
         }
       }
+
       setJcOpen(false);
+      setSelectedJcIds([]);
+      const readyItemsTotal = r2(
+        combinedReadyRows.reduce((s, r) => s + (num(r.qty) || 1) * num(r.rate), 0),
+      );
+      toast(
+        isMulti
+          ? `Combined ${fullJobs.length} orders (${allRefs.join(', ')}): ${combinedReadyRows.length} completed item(s) (Ready Total: ${fmt(readyItemsTotal)} AED)`
+          : `Loaded order ${allRefs[0]}: ${combinedReadyRows.length} completed item(s) (Ready Total: ${fmt(readyItemsTotal)} AED)`,
+        'info',
+      );
     },
-    [toast],
+    [toast, pickLedger],
+  );
+
+  const convertFrom = useCallback(
+    async (rawJ: JobCard) => {
+      await convertMultiple([rawJ]);
+    },
+    [convertMultiple],
   );
 
   useEffect(() => {
+    if (mode === 'edit') return;
     if (!fromJobCardId) return;
     let live = true;
     void (async () => {
@@ -651,7 +875,7 @@ export function SaleForm() {
     return () => {
       live = false;
     };
-  }, [fromJobCardId, convertFrom, toast]);
+  }, [fromJobCardId, convertFrom, toast, mode]);
 
   function handleClearMode(m: TenderMode) {
     setSplit((prev) => ({ ...prev, [m]: '' }));
@@ -699,48 +923,34 @@ export function SaleForm() {
       const usedCard = num(effectiveSplit.card) > 0;
       const usedBank = num(effectiveSplit.bank) > 0;
 
-      const sale = await api.sales.create({
+      const salePayload = {
         billDate,
-        saleType: 'retail',
-        paymentType: method === 'credit' ? 'credit' : 'cash',
-        category: 'A',
+        saleType: 'retail' as const,
+        paymentType: (method === 'credit' ? 'credit' : 'cash') as 'cash' | 'credit',
+        category: 'A' as const,
         bookingNo: bookingNo.trim() || undefined,
         refNo: refNo.trim() || (billNo ? `B-${billNo}` : undefined),
         jobCardRef: refNo.trim() || bookingNo.trim() || undefined,
-        jobCardId: jobCardId || undefined,
+        jobCardId: jobCardId || (jobCardIds.length > 0 ? jobCardIds[0] : undefined),
+        jobCardIds: jobCardIds.length > 0 ? jobCardIds : (jobCardId ? [jobCardId] : undefined),
         delDate: deliveryDate || undefined,
         salesman: settings.salesman,
         partyName: partyName.trim(),
         phone: phone.trim(),
         ledgerId: ledgerId || undefined,
-        items: [
-          ...validItems.map((r) => ({
-            code: r.code,
-            productName: r.productName,
-            unit: r.unit,
-            qty: num(r.qty),
-            rate: num(r.rate),
-            discType: r.discType,
-            discInput: num(r.discInput),
-            warranty: num(r.warranty),
-            info: r.info,
-            completed: true,
-            status: 'ready' as const,
-          })),
-          ...pendingOrderItems.map((p) => ({
-            code: p.code,
-            productName: p.productName,
-            unit: p.unit,
-            qty: num(p.qty),
-            rate: num(p.rate),
-            discType: p.discType,
-            discInput: num(p.discInput),
-            warranty: num(p.warranty),
-            info: p.info,
-            completed: false,
-            status: 'pending' as const,
-          })),
-        ],
+        items: validItems.map((r) => ({
+          code: r.code,
+          productName: r.productName,
+          unit: r.unit,
+          qty: num(r.qty),
+          rate: num(r.rate),
+          discType: r.discType,
+          discInput: num(r.discInput),
+          warranty: num(r.warranty),
+          info: r.info,
+          completed: true,
+          status: 'ready' as const,
+        })),
         materialsUsed: materials
           .filter((m) => m.code || m.productName || num(m.rate))
           .map((m) => ({
@@ -778,7 +988,12 @@ export function SaleForm() {
         paidOn: new Date().toISOString(),
         isReturn,
         defaultTaxPercent: taxRate,
-      });
+      };
+
+      const sale =
+        mode === 'edit' && initial?._id
+          ? await api.sales.update(initial._id, salePayload)
+          : await api.sales.create(salePayload);
 
       // Save payment details against the customer for future convenience
       if (ledgerId && (usedCard || usedBank)) {
@@ -803,8 +1018,12 @@ export function SaleForm() {
         }
       }
 
-      toast(`${isReturn ? 'Return' : 'Bill'} ${sale.billNo} saved`);
-      router.push(andPrint ? `/sales/${sale._id}?print=1` : '/sales');
+      toast(`${isReturn ? 'Return' : 'Bill'} ${sale.billNo} ${mode === 'edit' ? 'updated' : 'saved'}`);
+      if (onDone) {
+        onDone();
+      } else {
+        router.push(andPrint ? `/sales/${sale._id}?print=1` : `/sales/${sale._id}`);
+      }
     } catch (e) {
       toast(e instanceof Error ? e.message : 'Save failed', 'error');
     } finally {
@@ -1057,7 +1276,7 @@ export function SaleForm() {
                         <span
                           className={`inline-flex items-center justify-center gap-1 w-full rounded-md px-1.5 py-1 text-[11px] font-bold shadow-sm select-none ${
                             r.status === 'pending'
-                              ? 'bg-amber-100 text-amber-800 border border-amber-300'
+                              ? 'bg-rose-100 text-rose-800 border border-rose-300'
                               : 'bg-emerald-100 text-emerald-800 border border-emerald-300'
                           }`}
                           title={`Status: ${r.status === 'pending' ? 'Pending' : 'Ready'}`}
@@ -1219,7 +1438,7 @@ export function SaleForm() {
                 </span>
                 {calc.pendingCount > 0 && (
                   <span className="text-ink-600">
-                    Pending Items: <span className="tabular-nums font-extrabold text-amber-700">{calc.pendingCount}</span>
+                    Pending Items: <span className="tabular-nums font-extrabold text-rose-700">{calc.pendingCount}</span>
                   </span>
                 )}
               </div>
@@ -1229,70 +1448,6 @@ export function SaleForm() {
                 </span>
                 <span>
                   Bill Total: <span className="tabular-nums font-extrabold text-brand-700">{fmt(calc.total)} AED</span>
-                </span>
-              </div>
-            </div>
-
-            {/* Additional Charges & Discount toolbar */}
-            <div className="mt-3 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-ink-200/80 bg-ink-50/60 p-3">
-              <div className="flex flex-wrap items-center gap-4 sm:gap-6">
-                {/* Additional Charges */}
-                <div className="flex items-center gap-2">
-                  <span className="text-xs font-bold text-ink-700">Additional Charges:</span>
-                  <div className="flex items-center gap-1.5">
-                    <select
-                      value={additionalChargesType}
-                      onChange={(e) => setAdditionalChargesType(e.target.value as 'fixed' | 'percent')}
-                      className="input-sm !w-20 !py-1 text-xs font-bold bg-white border border-ink-200 rounded-lg cursor-pointer text-ink-700 shadow-xs"
-                    >
-                      <option value="fixed">AED</option>
-                      <option value="percent">%</option>
-                    </select>
-                    <NumberInput
-                      value={additionalChargesInput}
-                      onChange={(e) => setAdditionalChargesInput(e.target.value)}
-                      className="input-sm !w-24 text-right font-semibold"
-                      placeholder="0"
-                    />
-                  </div>
-                </div>
-
-                {/* Discount with Currency (AED) or % */}
-                <div className="flex items-center gap-2">
-                  <span className="text-xs font-bold text-ink-700">Discount:</span>
-                  <div className="flex items-center gap-1.5">
-                    <select
-                      value={discountType}
-                      onChange={(e) => setDiscountType(e.target.value as 'fixed' | 'percent')}
-                      className="input-sm !w-20 !py-1 text-xs font-bold bg-white border border-ink-200 rounded-lg cursor-pointer text-ink-700 shadow-xs"
-                    >
-                      <option value="fixed">AED</option>
-                      <option value="percent">%</option>
-                    </select>
-                    <NumberInput
-                      value={discountInput}
-                      onChange={(e) => setDiscountInput(e.target.value)}
-                      className="input-sm !w-24 text-right font-semibold"
-                      placeholder="0"
-                    />
-                  </div>
-                </div>
-              </div>
-
-              {/* Subtotal preview right-aligned */}
-              <div className="flex flex-wrap items-center gap-3 sm:gap-4 text-xs font-bold text-ink-700 ml-auto">
-                {calc.additionalCharges > 0 && (
-                  <span className="text-emerald-700">
-                    +Charges: <span className="tabular-nums font-black">{fmt(calc.additionalCharges)} AED</span>
-                  </span>
-                )}
-                {calc.orderDiscount > 0 && (
-                  <span className="text-rose-600">
-                    -Discount: <span className="tabular-nums font-black">{fmt(calc.orderDiscount)} AED</span>
-                  </span>
-                )}
-                <span className="text-ink-900">
-                  Total Before Tax: <span className="tabular-nums font-extrabold text-brand-800">{fmt(calc.taxable)} AED</span>
                 </span>
               </div>
             </div>
@@ -1530,7 +1685,7 @@ export function SaleForm() {
                   Total Payable
                 </p>
                 <p className="mt-0.5 text-[10px] font-medium text-white/60">
-                  Items: {calc.itemCount} ({calc.readyCount} Ready{calc.pendingCount > 0 ? `, ${calc.pendingCount} Pending` : ''}) · Quantity: {fmt(calc.qtyCount)}
+                  Items: {calc.itemCount} Ready · Quantity: {fmt(calc.qtyCount)}
                 </p>
               </div>
               <p className="shrink-0 text-xl font-black tabular-nums leading-none">
@@ -1607,14 +1762,26 @@ export function SaleForm() {
                     onClick={() => void save(false)}
                     disabled={saving}
                   >
-                    {saving ? 'Saving…' : 'Save Only'}
+                    {saving
+                      ? mode === 'edit'
+                        ? 'Updating…'
+                        : 'Saving…'
+                      : mode === 'edit'
+                        ? 'Update Only'
+                        : 'Save Only'}
                   </button>
                   <button
                     className="btn-primary !py-2 text-[13px]"
                     onClick={() => void save(true)}
                     disabled={saving}
                   >
-                    {saving ? 'Saving…' : 'Save & Print'}
+                    {saving
+                      ? mode === 'edit'
+                        ? 'Updating…'
+                        : 'Saving…'
+                      : mode === 'edit'
+                        ? 'Update & Print'
+                        : 'Save & Print'}
                   </button>
                 </div>
               </div>
@@ -1680,9 +1847,36 @@ export function SaleForm() {
         }
         size="xl"
         footer={
-          <button className="btn-soft" onClick={() => setJcOpen(false)}>
-            Cancel
-          </button>
+          <div className="flex w-full items-center justify-between gap-2">
+            <div>
+              {selectedJcIds.length > 0 && (
+                <span className="text-xs font-semibold text-brand-700">
+                  {selectedJcIds.length} order{selectedJcIds.length > 1 ? 's' : ''} selected
+                </span>
+              )}
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                className="btn-soft"
+                onClick={() => {
+                  setJcOpen(false);
+                  setSelectedJcIds([]);
+                }}
+              >
+                Cancel
+              </button>
+              {selectedJcIds.length > 0 && (
+                <button
+                  type="button"
+                  className="btn-primary font-bold flex items-center gap-1.5"
+                  onClick={() => void convertMultiple(selectedJobs)}
+                >
+                  <span>⚡ Combine & Invoice ({selectedJcIds.length} Orders)</span>
+                </button>
+              )}
+            </div>
+          </div>
         }
       >
         <div className="mb-4 flex gap-2">
@@ -1760,7 +1954,7 @@ export function SaleForm() {
                         {fmt(s.balance)}
                       </td>
                       <td className="td text-center whitespace-nowrap">
-                        <StatusBadge status={s.isReturn ? 'return' : (s.orderStatus || 'delivered')} />
+                        <StatusBadge status={s.isReturn ? 'return' : (s.isDeleted || s.status === 'cancelled' ? 'deleted' : 'closed')} />
                       </td>
                     </tr>
                   ))}
@@ -1778,10 +1972,56 @@ export function SaleForm() {
                 Stitching Orders
               </h3>
             )}
+
+            {selectedJcIds.length > 0 && (
+              <div className="mb-3 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-brand-300 bg-brand-50/90 px-4 py-2.5 shadow-sm">
+                <div className="flex items-center gap-2.5">
+                  <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-brand-600 text-white font-bold text-xs shadow-xs">
+                    {selectedJcIds.length}
+                  </div>
+                  <div>
+                    <div className="text-xs font-bold text-ink-900">
+                      {selectedJcIds.length === 1
+                        ? '1 Order Selected'
+                        : `${selectedJcIds.length} Orders Selected (${selectedJobs.map((j) => `Book #${j.bookNo ?? j.no}`).join(', ')})`}
+                    </div>
+                    <div className="text-[11px] text-ink-600">
+                      Combined Net: <span className="font-bold text-ink-900">{fmt(selectedNetTotal)} AED</span> • Advance: <span className="font-bold text-emerald-700">{fmt(selectedAdvTotal)} AED</span> • Balance: <span className="font-bold text-brass-700">{fmt(Math.max(selectedNetTotal - selectedAdvTotal, 0))} AED</span>
+                    </div>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    className="btn-soft !py-1 !px-2.5 text-xs"
+                    onClick={() => setSelectedJcIds([])}
+                  >
+                    Clear
+                  </button>
+                  <button
+                    type="button"
+                    className="btn-primary !py-1.5 !px-3.5 text-xs font-bold flex items-center gap-1.5 shadow-xs"
+                    onClick={() => void convertMultiple(selectedJobs)}
+                  >
+                    <span>⚡ Combine & Invoice ({selectedJcIds.length} Orders)</span>
+                  </button>
+                </div>
+              </div>
+            )}
+
             <div className="overflow-x-auto rounded-xl border border-ink-200 pb-20">
               <table className="w-full text-xs">
                 <thead>
                   <tr className="border-b border-ink-200 bg-ink-50/70 text-[11px] font-bold text-ink-600 uppercase tracking-wider">
+                    <th className="px-2 py-2 text-center w-[36px]">
+                      <input
+                        type="checkbox"
+                        aria-label="Select all orders"
+                        className="h-4 w-4 rounded border-ink-300 text-brand-600 focus:ring-brand-500 cursor-pointer"
+                        checked={jcRows.length > 0 && selectedJcIds.length === jcRows.length}
+                        onChange={(e) => handleSelectAll(e.target.checked)}
+                      />
+                    </th>
                     <th className="px-2.5 py-2 text-left w-[85px]">Inv No</th>
                     <th className="px-2 py-2 text-center w-[65px]">Book No</th>
                     <th className="px-2 py-2 text-left w-[90px]">Ref</th>
@@ -1793,26 +2033,53 @@ export function SaleForm() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-ink-100 text-xs">
-                  {jcRows.map((j) => (
-                    <tr
-                      key={j._id}
-                      className="cursor-pointer hover:bg-brand-50/60 transition-colors"
-                      onClick={() => convertFrom(j)}
-                    >
-                      <td className="px-2.5 py-2 font-mono font-bold text-brand-700">
-                        {j.invoiceNo ? j.invoiceNo.replace(/^B-?/i, '') : '—'}
-                      </td>
-                      <td className="px-2 py-2 text-center font-mono font-bold text-ink-700">
-                        {j.bookNo ?? j.no}
-                      </td>
-                      <td className="px-2 py-2 font-mono text-ink-600">{j.ref}</td>
-                      <td className="px-2.5 py-2 font-semibold text-ink-900">{j.partyName || '—'}</td>
-                      <td className="px-2.5 py-2 text-right tabular-nums font-semibold">{fmt(j.netAmount)}</td>
-                      <td className="px-2.5 py-2 text-right tabular-nums text-emerald-600 font-semibold">{fmt(j.advance)}</td>
-                      <td className="px-2 py-2 text-center whitespace-nowrap">
-                        <StatusBadge status={j.status} />
-                      </td>
-                      <td className="px-2 py-2 text-center" onClick={(e) => e.stopPropagation()}>
+                  {jcRows.map((j) => {
+                    const isSelected = selectedJcIds.includes(j._id);
+                    return (
+                      <tr
+                        key={j._id}
+                        className={`cursor-pointer transition-colors ${
+                          isSelected
+                            ? 'bg-brand-50 hover:bg-brand-100/70'
+                            : 'hover:bg-brand-50/60'
+                        }`}
+                        onClick={() => {
+                          if (selectedJcIds.length > 0) {
+                            handleToggleSelect(j);
+                          } else {
+                            void convertFrom(j);
+                          }
+                        }}
+                      >
+                        <td
+                          className="px-2 py-2 text-center"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleToggleSelect(j);
+                          }}
+                        >
+                          <input
+                            type="checkbox"
+                            aria-label={`Select order ${j.ref || j.bookNo}`}
+                            className="h-4 w-4 rounded border-ink-300 text-brand-600 focus:ring-brand-500 cursor-pointer"
+                            checked={isSelected}
+                            onChange={() => handleToggleSelect(j)}
+                          />
+                        </td>
+                        <td className="px-2.5 py-2 font-mono font-bold text-brand-700">
+                          {j.invoiceNo ? j.invoiceNo.replace(/^B-?/i, '') : '—'}
+                        </td>
+                        <td className="px-2 py-2 text-center font-mono font-bold text-ink-700">
+                          {j.bookNo ?? j.no}
+                        </td>
+                        <td className="px-2 py-2 font-mono text-ink-600">{j.ref}</td>
+                        <td className="px-2.5 py-2 font-semibold text-ink-900">{j.partyName || '—'}</td>
+                        <td className="px-2.5 py-2 text-right tabular-nums font-semibold">{fmt(j.netAmount)}</td>
+                        <td className="px-2.5 py-2 text-right tabular-nums text-emerald-600 font-semibold">{fmt(j.advance)}</td>
+                        <td className="px-2 py-2 text-center whitespace-nowrap">
+                          <StatusBadge status={j.status} />
+                        </td>
+                        <td className="px-2 py-2 text-center" onClick={(e) => e.stopPropagation()}>
                         <div className="relative inline-block text-left">
                           <button
                             type="button"
@@ -1862,10 +2129,10 @@ export function SaleForm() {
 
                               <button
                                 type="button"
-                                className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-xs font-medium text-amber-700 transition hover:bg-amber-50"
+                                className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-xs font-medium text-blue-700 transition hover:bg-blue-50"
                                 onClick={() => void updateOrderStatus(j._id, 'partially_ready')}
                               >
-                                <span>🟡</span>
+                                <span>🔵</span>
                                 <span>Partially Ready</span>
                               </button>
 
@@ -1874,16 +2141,16 @@ export function SaleForm() {
                                 className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-xs font-medium text-emerald-700 transition hover:bg-emerald-50"
                                 onClick={() => void updateOrderStatus(j._id, 'ready')}
                               >
-                                <span>✓</span>
+                                <span>🟢</span>
                                 <span>Complete (Ready)</span>
                               </button>
 
                               <button
                                 type="button"
-                                className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-xs font-medium text-brand-700 transition hover:bg-brand-50"
+                                className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-xs font-medium text-rose-700 transition hover:bg-rose-50"
                                 onClick={() => void updateOrderStatus(j._id, 'open')}
                               >
-                                <span>⏳</span>
+                                <span>🔴</span>
                                 <span>Pending (Open)</span>
                               </button>
 
@@ -1912,7 +2179,8 @@ export function SaleForm() {
                         </div>
                       </td>
                     </tr>
-                  ))}
+                    );
+                  })}
                 </tbody>
               </table>
             </div>

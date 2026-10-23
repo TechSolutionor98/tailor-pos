@@ -232,8 +232,10 @@ export function SaleInvoice({
             sale.isReturn
               ? 'bg-rose-100 text-rose-800 border border-rose-300'
               : sale.orderStatus === 'partially_ready'
-                ? 'bg-amber-100 text-amber-800 border border-amber-300'
-                : 'bg-emerald-100 text-emerald-800 border border-emerald-300'
+                ? 'bg-blue-100 text-blue-800 border border-blue-300'
+                : sale.orderStatus === 'open' || sale.orderStatus === 'pending'
+                  ? 'bg-rose-100 text-rose-800 border border-rose-300'
+                  : 'bg-emerald-100 text-emerald-800 border border-emerald-300'
           }`}
         >
           {sale.isReturn
@@ -406,7 +408,7 @@ export function SaleInvoice({
                       <div className="flex items-center gap-1.5 flex-wrap">
                         <span className="font-semibold text-neutral-900">{r.productName}</span>
                         {r.status === 'pending' && (
-                          <span className="inline-block rounded bg-amber-100 px-1.5 py-0.5 text-[6pt] font-black uppercase text-amber-800 border border-amber-300 print:[print-color-adjust:exact]">
+                          <span className="inline-block rounded bg-rose-100 px-1.5 py-0.5 text-[6pt] font-black uppercase text-rose-800 border border-rose-300 print:[print-color-adjust:exact]">
                             Pending
                           </span>
                         )}

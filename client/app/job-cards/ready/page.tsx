@@ -22,15 +22,16 @@ function ReadyOrdersActionMenu({
   canConvert: boolean;
   canEdit: boolean;
   onDeleted: () => void;
-  onUpdated: () => void;
+  onUpdated?: () => void;
 }) {
   const router = useRouter();
   const { toast } = useToast();
   const [open, setOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
-  const [updatingStatus, setUpdatingStatus] = useState(false);
+  const [updating, setUpdating] = useState(false);
   const anchorRef = useRef<HTMLDivElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
+  const hasInvoiced = Boolean(order.invoiceNo) || (order.items || []).some((i) => Boolean(i.invoiced));
 
   useEffect(() => {
     if (!open) return;
@@ -39,41 +40,51 @@ function ReadyOrdersActionMenu({
       if (anchorRef.current?.contains(t) || panelRef.current?.contains(t)) return;
       setOpen(false);
     };
+    const key = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setOpen(false);
+    };
     document.addEventListener('mousedown', away);
-    return () => document.removeEventListener('mousedown', away);
+    document.addEventListener('keydown', key);
+    return () => {
+      document.removeEventListener('mousedown', away);
+      document.removeEventListener('keydown', key);
+    };
   }, [open]);
 
-  const changeStatus = async (newStatus: string) => {
+  const handlePending = async () => {
     setOpen(false);
-    if (newStatus === order.status) return;
-    setUpdatingStatus(true);
+    const numStr = order.no ?? order.ref;
+    setUpdating(true);
     try {
-      await api.jobCards.updateStatus(order._id, newStatus);
-      const label =
-        newStatus === 'open'
-          ? 'Pending'
-          : newStatus === 'partially_ready'
-          ? 'Partially Ready'
-          : newStatus === 'ready'
-          ? 'Ready'
-          : newStatus === 'delivered'
-          ? 'Delivered'
-          : newStatus === 'closed'
-          ? 'Completed'
-          : newStatus;
-      toast(`Order #${order.no ?? order.ref} status changed to ${label}`, 'success');
-      onUpdated();
+      await api.jobCards.setPending(order._id);
+      toast(`Order #${numStr} status set to Pending (Open)`, 'success');
+      onUpdated?.();
     } catch (e) {
-      toast(e instanceof Error ? e.message : 'Failed to update status', 'error');
+      toast(e instanceof Error ? e.message : 'Failed to set order status to pending', 'error');
     } finally {
-      setUpdatingStatus(false);
+      setUpdating(false);
+    }
+  };
+
+  const handleReady = async () => {
+    setOpen(false);
+    const numStr = order.no ?? order.ref;
+    setUpdating(true);
+    try {
+      await api.jobCards.markReady(order._id);
+      toast(`Order #${numStr} marked as Ready`, 'success');
+      onUpdated?.();
+    } catch (e) {
+      toast(e instanceof Error ? e.message : 'Failed to mark order as ready', 'error');
+    } finally {
+      setUpdating(false);
     }
   };
 
   const handleDelete = async () => {
     setOpen(false);
     const numStr = order.no ?? order.ref;
-    if (!window.confirm(`Are you sure you want to delete order #${numStr}?`)) {
+    if (!window.confirm(`Are you sure you want to delete stitching order #${numStr}?`)) {
       return;
     }
     setDeleting(true);
@@ -88,47 +99,51 @@ function ReadyOrdersActionMenu({
     }
   };
 
-  const hasInvoiced = Boolean(order.invoiceNo) || (order.items || []).some((i) => Boolean(i.invoiced));
-  const statusOptions = [
-    { value: 'ready', label: 'Ready', dot: 'bg-emerald-500' },
-    { value: 'partially_ready', label: 'Partially Ready', dot: 'bg-amber-500' },
-    ...(hasInvoiced ? [] : [{ value: 'open', label: 'Pending', dot: 'bg-blue-500' }]),
-    { value: 'delivered', label: 'Delivered', dot: 'bg-indigo-500' },
-  ];
-
   return (
-    <div ref={anchorRef} className="relative inline-block text-right" onClick={(e) => e.stopPropagation()}>
+    <div ref={anchorRef} className="relative inline-block text-left" onClick={(e) => e.stopPropagation()}>
       <button
         type="button"
-        className="btn-soft inline-flex items-center gap-1 !px-2.5 !py-1 text-xs font-semibold"
+        className="btn-soft inline-flex items-center gap-1 !px-2 !py-0.5 text-[11px] font-semibold"
         onClick={() => setOpen((prev) => !prev)}
         aria-expanded={open}
-        disabled={deleting || updatingStatus}
+        disabled={deleting || updating}
       >
         <span>Action</span>
         <span className="text-[10px] text-ink-500">▾</span>
       </button>
 
-      <AnchoredDropdown anchorRef={anchorRef} panelRef={panelRef} open={open} width={200} direction="auto" align="right">
+      <AnchoredDropdown anchorRef={anchorRef} panelRef={panelRef} open={open} width={168} direction="auto">
         <div className="py-1 text-ink-800">
           <button
             type="button"
             className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs font-medium transition hover:bg-brand-50 hover:text-brand-800"
             onClick={() => {
               setOpen(false);
-              router.push(`/job-cards/${order._id}`);
+              router.push(`/job-cards/${order._id}?from=ready`);
             }}
           >
             <span className="text-sm">✏️</span>
             <span>{order.status === 'deleted' ? 'View' : 'Edit'}</span>
           </button>
 
-          {canConvert && (
+          {canConvert && order.status !== 'deleted' && order.status !== 'delivered' && order.status !== 'converted' && (
             <button
               type="button"
               className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs font-medium text-emerald-700 transition hover:bg-emerald-50 hover:text-emerald-800"
               onClick={() => {
                 setOpen(false);
+                const uninvoiced = (order.items || []).filter((i) => !i.invoiced);
+                const isPartially =
+                  order.status === 'partially_ready' ||
+                  Boolean(order.invoiceNo) ||
+                  (order.items || []).some((i) => i.invoiced || i.completed);
+                if (isPartially && !uninvoiced.some((i) => i.completed)) {
+                  toast(
+                    `Order ${order.ref || order.no} has no ready items to invoice. Please mark items as Complete first.`,
+                    'warning',
+                  );
+                  return;
+                }
                 router.push(`/sales/new?fromJobCard=${order._id}`);
               }}
               title="Shift this stitching order into New Sale"
@@ -143,20 +158,32 @@ function ReadyOrdersActionMenu({
             className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs font-medium transition hover:bg-brand-50 hover:text-brand-800"
             onClick={() => {
               setOpen(false);
-              router.push(`/job-cards/${order._id}/invoice?print=1`);
+              router.push(`/job-cards/${order._id}/invoice?print=1&from=ready`);
             }}
           >
             <span className="text-sm">🖨</span>
             <span>Print</span>
           </button>
 
+          {canEdit && (order.status === 'open' || order.status === 'partially_ready') && (
+            <button
+              type="button"
+              className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs font-medium text-emerald-700 transition hover:bg-emerald-50 hover:text-emerald-800"
+              onClick={handleReady}
+              disabled={updating}
+            >
+              <span className="text-sm">✓</span>
+              <span>Ready</span>
+            </button>
+          )}
+
           {canEdit && order.status !== 'deleted' && order.status !== 'delivered' && order.status !== 'converted' && (
             <button
               type="button"
-              className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs font-medium text-amber-700 transition hover:bg-amber-50 hover:text-amber-800"
+              className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs font-medium text-blue-700 transition hover:bg-blue-50 hover:text-blue-800"
               onClick={() => {
                 setOpen(false);
-                router.push(`/job-cards/${order._id}?action=partially_ready#order-items-section`);
+                router.push(`/job-cards/${order._id}?action=partially_ready&from=ready#order-items-section`);
               }}
               title="Open order to mark individual products as completed"
             >
@@ -165,39 +192,19 @@ function ReadyOrdersActionMenu({
             </button>
           )}
 
-          {canEdit && (
-            <>
-              <div className="my-1 border-t border-ink-100" />
-              <div className="px-3 py-1 text-[10px] font-bold uppercase tracking-wider text-ink-400">
-                Change Status
-              </div>
-
-              {statusOptions.map((s) => {
-                const isActive = order.status === s.value;
-                return (
-                  <button
-                    key={s.value}
-                    type="button"
-                    disabled={updatingStatus || isActive}
-                    className={`flex w-full items-center justify-between px-3 py-1.5 text-left text-xs font-medium transition ${
-                      isActive
-                        ? 'bg-brand-50 text-brand-800 font-semibold cursor-default'
-                        : 'hover:bg-brand-50 hover:text-brand-800'
-                    }`}
-                    onClick={() => void changeStatus(s.value)}
-                  >
-                    <span className="flex items-center gap-2">
-                      <span className={`h-2 w-2 rounded-full ${s.dot}`} />
-                      <span>{s.label}</span>
-                    </span>
-                    {isActive && <span className="text-[10px] text-brand-600 font-bold">✓</span>}
-                  </button>
-                );
-              })}
-            </>
+          {canEdit && order.status !== 'open' && order.status !== 'deleted' && !hasInvoiced && (
+            <button
+              type="button"
+              className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs font-medium text-rose-700 transition hover:bg-rose-50 hover:text-rose-800"
+              onClick={handlePending}
+              disabled={updating}
+            >
+              <span className="text-sm">⏳</span>
+              <span>Pending</span>
+            </button>
           )}
 
-          {canEdit && (
+          {canEdit && order.status !== 'deleted' && (
             <>
               <div className="my-1 border-t border-ink-100" />
               <button
@@ -446,13 +453,13 @@ function ReadyOrdersInner() {
                       onClick={(e) => {
                         const el = e.target as HTMLElement;
                         if (el.closest('a, button, input, label')) return;
-                        router.push(`/job-cards/${j._id}`);
+                        router.push(`/job-cards/${j._id}?from=ready`);
                       }}
                       className="group cursor-pointer transition-colors duration-150 hover:bg-brand-50/40"
                     >
                       <td className="px-3 py-2.5">
                         <Link
-                          href={`/job-cards/${j._id}`}
+                          href={`/job-cards/${j._id}?from=ready`}
                           className="inline-flex items-center font-mono font-bold text-brand-800 bg-brand-50 border border-brand-200/80 px-2 py-0.5 rounded text-xs shadow-sm hover:bg-brand-100 hover:border-brand-400 transition"
                           onClick={(e) => e.stopPropagation()}
                         >
@@ -495,21 +502,27 @@ function ReadyOrdersInner() {
                         )}
                       </td>
                       <td className="px-3 py-2.5 text-center whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
-                        {isReady ? (
-                          <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-300 bg-emerald-50 px-2.5 py-0.5 text-[10px] font-extrabold text-emerald-800 shadow-sm font-heading">
-                            <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                        {j.status === 'ready' ? (
+                          <span className="inline-flex w-[78px] items-center justify-center rounded-full border border-emerald-300 bg-emerald-50 py-1 text-[10px] font-extrabold text-emerald-800 shadow-sm font-heading">
                             <span>Ready</span>
                           </span>
+                        ) : j.status === 'partially_ready' ? (
+                          <span className="inline-flex w-[78px] items-center justify-center rounded-full border border-blue-300 bg-blue-50 py-0.5 text-[8.5px] font-extrabold text-blue-700 shadow-sm font-heading leading-tight">
+                            <span className="flex flex-col text-center leading-[1.05]">
+                              <span>Partially</span>
+                              <span>Ready</span>
+                            </span>
+                          </span>
+                        ) : j.status === 'open' || (j.status as string) === 'pending' ? (
+                          <span className="inline-flex w-[78px] items-center justify-center rounded-full border border-rose-300 bg-rose-50 py-1 text-[10px] font-extrabold text-rose-700 shadow-sm font-heading">
+                            <span>Pending</span>
+                          </span>
                         ) : isDelivered ? (
-                          <span className="inline-flex items-center gap-1.5 rounded-full border border-blue-300 bg-blue-50 px-2.5 py-0.5 text-[10px] font-extrabold text-blue-800 shadow-sm font-heading">
-                            <span className="h-1.5 w-1.5 rounded-full bg-blue-500" />
+                          <span className="inline-flex w-[78px] items-center justify-center rounded-full border border-purple-300 bg-purple-50 py-1 text-[9.5px] font-extrabold text-purple-800 shadow-sm font-heading">
                             <span>Delivered</span>
                           </span>
                         ) : (
-                          <span className="inline-flex items-center gap-1.5 rounded-full border border-amber-300 bg-amber-50 px-2.5 py-0.5 text-[10px] font-extrabold text-amber-900 shadow-sm font-heading">
-                            <span className="h-1.5 w-1.5 rounded-full bg-amber-500" />
-                            <span>Partially Ready</span>
-                          </span>
+                          <StatusBadge status={j.status} />
                         )}
                       </td>
                       <td className="px-3 py-2.5 text-right whitespace-nowrap" onClick={(e) => e.stopPropagation()}>

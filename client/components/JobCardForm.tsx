@@ -276,6 +276,7 @@ export function JobCardForm({ initial, mode }: { initial?: JobCard | null; mode:
 
   const searchParams = useSearchParams();
   const actionParam = searchParams?.get('action');
+  const fromParam = searchParams?.get('from');
 
   useEffect(() => {
     if (actionParam === 'partially_ready') {
@@ -684,7 +685,13 @@ export function JobCardForm({ initial, mode }: { initial?: JobCard | null; mode:
 
       // Saved and done with: the form hands over to the invoice or back to
       // the list rather than sitting on a screen whose work is complete.
-      router.push(andPrint ? `/job-cards/${doc._id}/invoice?print=1` : '/job-cards');
+      router.push(
+        andPrint
+          ? `/job-cards/${doc._id}/invoice?print=1${fromParam === 'ready' ? '&from=ready' : ''}`
+          : fromParam === 'ready'
+            ? '/job-cards/ready'
+            : '/job-cards',
+      );
     } catch (e) {
       toast(e instanceof Error ? e.message : 'Save failed', 'error');
     } finally {
@@ -692,7 +699,7 @@ export function JobCardForm({ initial, mode }: { initial?: JobCard | null; mode:
     }
   }
 
-  async function saveAndConvert() {
+  async function saveAndMakeToSale() {
     if (!partyName.trim()) {
       toast('Customer Name is required', 'error');
       return;
@@ -708,24 +715,173 @@ export function JobCardForm({ initial, mode }: { initial?: JobCard | null; mode:
       if (!doc) return;
       settled.current = true;
 
+      // Book any split payment entered right now on the form
       const taken = await bookSplit(doc._id, doc.balance, false);
-      const what = `Order ${doc.no} updated · Shifting to New Sale`;
-      toast(taken > 0 ? `${what} · ${fmt(taken)} AED recorded` : what);
+      if (taken > 0) {
+        try {
+          doc = await api.jobCards.get(doc._id);
+        } catch {
+          // ignore
+        }
+      }
 
-      const uninvoiced = (doc.items || []).filter((i) => !i.invoiced);
-      const isPartially =
-        doc.status === 'partially_ready' ||
-        Boolean(doc.invoiceNo) ||
-        (doc.items || []).some((i) => i.invoiced || i.completed);
-      if (isPartially && !uninvoiced.some((i) => i.completed)) {
-        toast('Order saved. However, no items are marked Complete to invoice yet.', 'warning');
-        router.push('/job-cards');
+      // Check which items are ready to invoice
+      const allItems = doc.items || [];
+      const uninvoiced = allItems.filter((i) => !i.invoiced);
+      if (uninvoiced.length === 0) {
+        toast(`Order #${doc.no ?? doc.ref} updated. All items have already been invoiced.`, 'warning');
+        router.push(fromParam === 'ready' ? '/job-cards/ready' : '/job-cards');
         return;
       }
 
-      router.push(`/sales/new?fromJobCard=${doc._id}`);
+      // ONLY products that are COMPLETED and NOT yet invoiced:
+      const completedToBill =
+        doc.status === 'ready'
+          ? uninvoiced
+          : uninvoiced.filter((i) => Boolean(i.completed));
+
+      if (completedToBill.length === 0) {
+        toast(
+          `Order #${doc.no ?? doc.ref} updated. No completed products found to invoice. Please mark the products as Complete first.`,
+          'warning'
+        );
+        return;
+      }
+
+      const readyRows = completedToBill.map((i) => ({
+        code: i.code ?? '',
+        productName: i.productName ?? '',
+        unit: 'Pcs',
+        qty: num(i.qty, 1),
+        rate: num(i.rate, 0),
+        discType: 'fixed' as const,
+        discInput: 0,
+        warranty: 0,
+        info: i.personUid ? (sets.find((s) => s.uid === i.personUid)?.name || '') : '',
+        completed: true,
+        status: 'ready' as const,
+      }));
+
+      const isFirstBill = !doc.invoiceNo;
+      const loadedMaterials: { code: string; productName: string; qty: number; rate: number }[] = [];
+      if (isFirstBill) {
+        if (doc.materialsUsed && doc.materialsUsed.length > 0) {
+          for (const m of doc.materialsUsed) {
+            if (m.code || m.productName || num(m.qty) || num(m.rate)) {
+              loadedMaterials.push({
+                code: m.code ?? '',
+                productName: m.productName ?? '',
+                qty: num(m.qty ?? 1),
+                rate: num(m.rate ?? 0),
+              });
+            }
+          }
+        }
+        if (doc.measurementSets && doc.measurementSets.length > 0) {
+          for (const set of doc.measurementSets) {
+            for (const m of set.materials ?? []) {
+              if (m.code || m.productName || num(m.qty) || num(m.rate)) {
+                loadedMaterials.push({
+                  code: m.code ?? '',
+                  productName: m.productName ?? '',
+                  qty: num(m.qty ?? 1),
+                  rate: num(m.rate ?? 0),
+                });
+              }
+            }
+          }
+        }
+      }
+
+      const readyGross = r2(readyRows.reduce((s, r) => s + num(r.qty) * num(r.rate), 0));
+      const readyTax = r2((readyGross * taxRate) / 100);
+      const readyNet = r2(readyGross + readyTax);
+
+      const availAdv =
+        doc.remainingAdvance !== undefined ? num(doc.remainingAdvance) : num(doc.advance);
+      const advToApply = Math.min(availAdv, readyNet);
+      const bd: Record<TenderMode, number> = { cash: 0, card: 0, bank: 0 };
+      if (advToApply > 0) {
+        if (doc.payments && doc.payments.length > 0) {
+          let left = advToApply;
+          for (const p of doc.payments) {
+            if (left <= 0) break;
+            const m = (p.mode === 'credit' ? 'cash' : p.mode) as TenderMode;
+            if (m in bd) {
+              const take = Math.min(left, num(p.amount));
+              bd[m] = r2(bd[m] + take);
+              left = r2(left - take);
+            }
+          }
+          if (left > 0) {
+            bd.cash = r2(bd.cash + left);
+          }
+        } else {
+          const m = (doc.paymentMode as TenderMode) || 'cash';
+          if (m in bd) {
+            bd[m] = r2(advToApply);
+          }
+        }
+      }
+
+      const totalCash = r2(bd.cash);
+      const totalCard = r2(bd.card);
+      const totalBank = r2(bd.bank);
+      const activeModesCount = [totalCash > 0, totalCard > 0, totalBank > 0].filter(Boolean).length;
+      let method = 'cash';
+      if (activeModesCount > 1) {
+        method = 'split';
+      } else if (totalCard > 0) {
+        method = 'card';
+      } else if (totalBank > 0) {
+        method = 'bank';
+      } else if (totalCash > 0) {
+        method = 'cash';
+      } else if (r2(totalCash + totalCard + totalBank) === 0) {
+        method = 'credit';
+      }
+
+      const orderBookNo =
+        doc.bookNo != null ? String(doc.bookNo) : doc.no != null ? String(doc.no) : '';
+      const orderRefNo = doc.ref || (doc.no != null ? `Ref-${doc.no}` : '');
+
+      const sale = await api.sales.create({
+        billDate: todayISO(),
+        saleType: 'retail',
+        paymentType: method === 'credit' ? 'credit' : 'cash',
+        category: 'A',
+        bookingNo: orderBookNo,
+        refNo: orderRefNo,
+        jobCardRef: orderRefNo,
+        jobCardId: doc._id,
+        delDate: doc.deliveryDate ? toISODate(doc.deliveryDate) : undefined,
+        salesman: settings.salesman || 'GENERAL',
+        partyName: doc.partyName?.trim() || partyName.trim(),
+        phone: doc.phone?.trim() || phone.trim(),
+        ledgerId: doc.ledgerId || ledgerId || undefined,
+        items: readyRows,
+        materialsUsed: loadedMaterials,
+        materialTotal: r2(loadedMaterials.reduce((s, m) => s + num(m.qty) * num(m.rate), 0)),
+        additionalCharges: isFirstBill ? num(doc.additionalCharges) : 0,
+        additionalChargesType: (doc as any).additionalChargesType || 'fixed',
+        additionalChargesInput: isFirstBill ? num((doc as any).additionalChargesInput ?? doc.additionalCharges) : 0,
+        discountType: (doc as any).discountType || 'fixed',
+        discountInput: isFirstBill ? num((doc as any).discountInput ?? doc.discount) : 0,
+        advanceAmount: r2(totalCash + totalCard + totalBank),
+        paymentMethod: method,
+        cashPaid: totalCash,
+        cardPaid: totalCard,
+        bankPaid: totalBank,
+        defaultTaxPercent: taxRate,
+      });
+
+      toast(
+        `Order #${doc.no ?? doc.ref} updated · Sales invoice B-${sale.billNo} generated successfully!`,
+        'success'
+      );
+      router.push(`/sales/${sale._id}?print=1`);
     } catch (e) {
-      toast(e instanceof Error ? e.message : 'Save failed', 'error');
+      toast(e instanceof Error ? e.message : 'Save & Make to Sale failed', 'error');
     } finally {
       setSaving(false);
     }
@@ -1379,11 +1535,11 @@ export function JobCardForm({ initial, mode }: { initial?: JobCard | null; mode:
             </div>
 
             {actionParam === 'partially_ready' && (
-              <div className="mb-3.5 flex items-center justify-between rounded-xl bg-amber-50 px-4 py-3 text-xs font-medium text-amber-900 border border-amber-300 shadow-sm animate-pulse">
+              <div className="mb-3.5 flex items-center justify-between rounded-xl bg-blue-50 px-4 py-3 text-xs font-medium text-blue-900 border border-blue-300 shadow-sm animate-pulse">
                 <div className="flex items-center gap-2.5">
                   <span className="text-lg">✂️</span>
                   <span>
-                    <strong className="font-bold text-amber-950">Partially Ready Mode:</strong> Ready hone wali products ke aagay <strong>Mark Complete</strong> button dabayein, aur phir neeche <strong>Save</strong> button dabayein.
+                    <strong className="font-bold text-blue-950">Partially Ready Mode:</strong> Ready hone wali products ke aagay <strong>Mark Complete</strong> button dabayein, aur phir neeche <strong>Save</strong> button dabayein.
                   </span>
                 </div>
               </div>
@@ -1552,74 +1708,6 @@ export function JobCardForm({ initial, mode }: { initial?: JobCard | null; mode:
                   })}
                 </tbody>
               </table>
-            </div>
-
-            {/* Additional Charges & Discount toolbar */}
-            <div className="mt-3 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-ink-200/80 bg-ink-50/60 p-3">
-              <div className="flex flex-wrap items-center gap-4 sm:gap-6">
-                {/* Additional Charges */}
-                <div className="flex items-center gap-2">
-                  <span className="text-xs font-bold text-ink-700">Additional Charges:</span>
-                  <div className="flex items-center gap-1.5">
-                    <select
-                      value={additionalChargesType}
-                      onChange={(e) => setAdditionalChargesType(e.target.value as 'fixed' | 'percent')}
-                      disabled={readOnly}
-                      className="input-sm !w-20 !py-1 text-xs font-bold bg-white border border-ink-200 rounded-lg cursor-pointer text-ink-700 shadow-xs"
-                    >
-                      <option value="fixed">AED</option>
-                      <option value="percent">%</option>
-                    </select>
-                    <NumberInput
-                      value={additionalCharges}
-                      onChange={(e) => setAdditionalCharges(e.target.value)}
-                      disabled={readOnly}
-                      className="input-sm !w-24 text-right font-semibold"
-                      placeholder="0"
-                    />
-                  </div>
-                </div>
-
-                {/* Discount with Currency (AED) or % */}
-                <div className="flex items-center gap-2">
-                  <span className="text-xs font-bold text-ink-700">Discount:</span>
-                  <div className="flex items-center gap-1.5">
-                    <select
-                      value={discountType}
-                      onChange={(e) => setDiscountType(e.target.value as 'fixed' | 'percent')}
-                      disabled={readOnly}
-                      className="input-sm !w-20 !py-1 text-xs font-bold bg-white border border-ink-200 rounded-lg cursor-pointer text-ink-700 shadow-xs"
-                    >
-                      <option value="fixed">AED</option>
-                      <option value="percent">%</option>
-                    </select>
-                    <NumberInput
-                      value={discount}
-                      onChange={(e) => setDiscount(e.target.value)}
-                      disabled={readOnly}
-                      className="input-sm !w-24 text-right font-semibold"
-                      placeholder="0"
-                    />
-                  </div>
-                </div>
-              </div>
-
-              {/* Subtotal preview right-aligned */}
-              <div className="flex flex-wrap items-center gap-3 sm:gap-4 text-xs font-bold text-ink-700 ml-auto">
-                {calc.additionalCharges > 0 && (
-                  <span className="text-emerald-700">
-                    +Charges: <span className="tabular-nums font-black">{fmt(calc.additionalCharges)} AED</span>
-                  </span>
-                )}
-                {calc.discount > 0 && (
-                  <span className="text-rose-600">
-                    -Discount: <span className="tabular-nums font-black">{fmt(calc.discount)} AED</span>
-                  </span>
-                )}
-                <span className="text-ink-900">
-                  Total Before Tax: <span className="tabular-nums font-extrabold text-brand-800">{fmt(calc.taxable)} AED</span>
-                </span>
-              </div>
             </div>
           </section>
 
@@ -1795,10 +1883,11 @@ export function JobCardForm({ initial, mode }: { initial?: JobCard | null; mode:
                 <span />
               )}
               <button
+                type="button"
                 className="text-rose-600 underline-offset-2 hover:underline"
                 onClick={() => setHistoryOpen(true)}
               >
-                Order History
+                Payment History
               </button>
             </div>
 
@@ -1910,11 +1999,11 @@ export function JobCardForm({ initial, mode }: { initial?: JobCard | null; mode:
                 {mode === 'edit' && canConvert && (
                   <button
                     className="w-full rounded-xl bg-emerald-600 px-4 py-2 text-[13px] font-bold text-white transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-40"
-                    onClick={() => void saveAndConvert()}
+                    onClick={() => void saveAndMakeToSale()}
                     disabled={saving}
-                    title="Update order and shift all data to New Sale"
+                    title="Update order and generate sales invoice"
                   >
-                    {saving ? 'Updating…' : '⚡ Move to Sale'}
+                    {saving ? 'Updating & Generating Invoice…' : '⚡ Make to Sale'}
                   </button>
                 )}
               </div>
@@ -2140,10 +2229,10 @@ export function JobCardForm({ initial, mode }: { initial?: JobCard | null; mode:
 
                               <button
                                 type="button"
-                                className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-xs font-medium text-amber-700 transition hover:bg-amber-50"
+                                className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-xs font-medium text-blue-700 transition hover:bg-blue-50"
                                 onClick={() => void updateOrderStatus(j._id, 'partially_ready')}
                               >
-                                <span>🟡</span>
+                                <span>🔵</span>
                                 <span>Partially Ready</span>
                               </button>
 
@@ -2152,16 +2241,16 @@ export function JobCardForm({ initial, mode }: { initial?: JobCard | null; mode:
                                 className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-xs font-medium text-emerald-700 transition hover:bg-emerald-50"
                                 onClick={() => void updateOrderStatus(j._id, 'ready')}
                               >
-                                <span>✓</span>
+                                <span>🟢</span>
                                 <span>Complete (Ready)</span>
                               </button>
 
                               <button
                                 type="button"
-                                className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-xs font-medium text-brand-700 transition hover:bg-brand-50"
+                                className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-xs font-medium text-rose-700 transition hover:bg-rose-50"
                                 onClick={() => void updateOrderStatus(j._id, 'open')}
                               >
-                                <span>⏳</span>
+                                <span>🔴</span>
                                 <span>Pending (Open)</span>
                               </button>
 

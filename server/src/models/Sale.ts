@@ -34,6 +34,7 @@ export interface ISale extends Document {
   creditCardNo?: string;
   jobCardRef?: string;
   jobCardId?: Types.ObjectId;
+  jobCardIds?: Types.ObjectId[];
   orderStatus?: string;
   /** The stitching order this bill came out of, and the bill's own reference.
       Both are set by the system and are not the counter's to change. */
@@ -145,6 +146,7 @@ const saleSchema = new Schema<ISale>(
     creditCardNo: String,
     jobCardRef: { type: String, trim: true },
     jobCardId: { type: Schema.Types.ObjectId, ref: 'JobCard' },
+    jobCardIds: [{ type: Schema.Types.ObjectId, ref: 'JobCard' }],
     orderStatus: { type: String, trim: true },
     bookingNo: { type: String, trim: true },
     refNo: { type: String, trim: true },
@@ -192,7 +194,7 @@ const saleSchema = new Schema<ISale>(
     isDeleted: { type: Boolean, default: false },
     deletedAt: { type: Date },
     deletedBy: { type: String, trim: true },
-    status: { type: String, trim: true, default: 'active' },
+    status: { type: String, trim: true, default: 'closed' },
   },
   { timestamps: true },
 );

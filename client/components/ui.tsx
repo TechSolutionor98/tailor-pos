@@ -204,7 +204,7 @@ export function EmptyState({ title, sub }: { title: string; sub?: string }) {
 export function StatusBadge({ status }: { status: string }) {
   const norm = (status || '').toLowerCase().replace(/[\s-]+/g, '_');
   const cls =
-    norm === 'open'
+    norm === 'open' || norm === 'pending'
       ? 'badge-open'
       : norm === 'partially_ready'
         ? 'badge-partially-ready'
@@ -212,24 +212,32 @@ export function StatusBadge({ status }: { status: string }) {
           ? 'badge-ready'
           : norm === 'closed'
             ? 'badge-closed'
-            : norm === 'deleted' || norm === 'return'
+            : norm === 'deleted' || norm === 'return' || norm === 'cancelled'
               ? 'badge-deleted'
               : norm === 'delivered' || norm === 'converted'
                 ? 'badge-delivered'
                 : 'badge-muted';
-  const label =
-    norm === 'open'
+  const label: React.ReactNode =
+    norm === 'open' || norm === 'pending'
       ? 'Pending'
-      : norm === 'partially_ready'
-        ? 'Partially Ready'
-        : norm === 'ready'
-          ? 'Ready'
-          : norm === 'closed' || norm === 'completed'
+      : norm === 'partially_ready' ? (
+        <span className="flex flex-col text-center leading-[1.05] text-[8.5px]">
+          <span>Partially</span>
+          <span>Ready</span>
+        </span>
+      )
+      : norm === 'ready'
+        ? 'Ready'
+        : norm === 'closed'
+          ? 'Closed'
+          : norm === 'completed'
             ? 'Completed'
             : norm === 'delivered' || norm === 'converted'
               ? 'Delivered'
               : norm === 'return'
                 ? 'Return'
-                : status;
+                : norm === 'deleted' || norm === 'cancelled'
+                  ? 'Deleted'
+                  : status;
   return <span className={cls}>{label}</span>;
 }

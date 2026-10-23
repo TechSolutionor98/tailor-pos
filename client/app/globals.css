@@ -141,8 +141,9 @@
   .badge {
     @apply inline-flex items-center rounded-md px-2.5 py-0.5 text-[11px] font-bold uppercase tracking-wide font-heading;
   }
-  .badge-open {
-    @apply badge bg-brand-50 text-brand-800 border border-brand-200;
+  .badge-open,
+  .badge-pending {
+    @apply badge bg-rose-50 text-rose-700 border border-rose-300 shadow-sm;
   }
   .badge-closed {
     @apply badge bg-emerald-50 text-emerald-900 border border-emerald-300;
@@ -157,10 +158,10 @@
     @apply badge bg-rose-50 text-rose-700 border border-rose-200;
   }
   .badge-partially-ready {
-    @apply badge bg-amber-50 text-amber-900 border border-amber-300 shadow-sm;
+    @apply badge bg-blue-50 text-blue-700 border border-blue-300 shadow-sm;
   }
   .badge-ready {
-    @apply badge bg-emerald-50 text-emerald-900 border border-emerald-300 shadow-sm;
+    @apply badge bg-emerald-50 text-emerald-800 border border-emerald-300 shadow-sm;
   }
   .badge-muted {
     @apply badge bg-ink-100 text-ink-600;

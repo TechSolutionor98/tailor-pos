@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { Suspense, useEffect, useState } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
 import { useAuth } from '@/components/AuthContext';
 import { LoginView } from '@/components/LoginView';
@@ -122,7 +122,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
   return (
     <div className="flex min-h-screen">
-      <Sidebar open={navOpen} onClose={() => setNavOpen(false)} />
+      <Suspense fallback={null}>
+        <Sidebar open={navOpen} onClose={() => setNavOpen(false)} />
+      </Suspense>
       <div className="flex min-w-0 flex-1 flex-col">
         <Topbar onMenu={() => setNavOpen(true)} />
         <main className={`print-full mx-auto w-full max-w-[1500px] flex-1 ${fullBleed ? '' : 'px-4 py-4 sm:px-6 sm:py-5'}`}>

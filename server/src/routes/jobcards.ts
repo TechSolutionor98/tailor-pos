@@ -526,7 +526,12 @@ jobCardRouter.get(
     if (!doc) throw new HttpError(404, 'Stitching order not found');
 
     const sales = await Sale.find({
-      $or: [{ jobCardId: doc._id }, { jobCardRef: doc.ref }],
+      $or: [
+        { jobCardId: doc._id },
+        { jobCardIds: doc._id },
+        { jobCardRef: doc.ref },
+      ],
+      isDeleted: { $ne: true },
     }).lean();
 
     if (sales.length > 0 && Array.isArray(doc.items)) {
@@ -637,7 +642,12 @@ jobCardRouter.put(
 
     // 2. Cross-reference all linked sales for this order
     const linkedSales = await Sale.find({
-      $or: [{ jobCardId: existing._id }, { jobCardRef: existing.ref }],
+      $or: [
+        { jobCardId: existing._id },
+        { jobCardIds: existing._id },
+        { jobCardRef: existing.ref },
+      ],
+      isDeleted: { $ne: true },
     }).lean();
     if (linkedSales.length > 0) {
       const allSold: any[] = linkedSales.flatMap((s: any) =>
